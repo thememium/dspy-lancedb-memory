@@ -31,6 +31,7 @@ from dspy_memory.config import configure as _configure
 from dspy_memory.config import (
     get_embedding_config,
     get_reranker_config,
+    get_signature_config,
     get_store_config,
 )
 from dspy_memory.reranking import OpenRouterReranker
@@ -56,6 +57,7 @@ def configure(
     embedding_dim: int | None = None,
     uri: str | None = None,
     table_name: str | None = None,
+    signature=None,
     reranker_model: str | None = None,
     reranker_api_key: str | None = None,
 ):
@@ -78,6 +80,10 @@ def configure(
         LanceDB URI (directory path).  Fallback for ``Store()``.
     table_name :
         LanceDB table name.  Fallback for ``Store()``.
+    signature :
+        A DSPy ``Signature`` subclass for memory extraction.  The signature
+        must have ``memories: list[M]`` as its output field where ``M`` has
+        ``.content`` and ``.type`` string attributes.
     reranker_model :
         Reranker model identifier
         (e.g. ``"cohere/rerank-4-fast"``).  ``None`` disables reranking.
@@ -103,6 +109,7 @@ def configure(
         embedding_dim=embedding_dim,
         uri=uri,
         table_name=table_name,
+        signature=signature,
         reranker_model=reranker_model,
         reranker_api_key=reranker_api_key,
     )
@@ -118,6 +125,7 @@ def Store(
     table_name: str | None | Any = _UNSET,
     embedding_model: str | None = None,
     embedding_dim: int | None = None,
+    signature=None,
     reranker: Reranker | None | Any = _UNSET,
     rerank_limit_multiplier: int = 10,
 ) -> LanceDSPyMemoryStore:
@@ -136,6 +144,9 @@ def Store(
         :func:`configure` when ``None``.
     embedding_dim :
         Override the embedding dimension.  Falls back to :func:`configure` value.
+    signature :
+        Custom DSPy ``Signature`` subclass for extraction.  Falls back to
+        :func:`configure`, then to the built-in ``ExtractMemory``.
     reranker :
         A LanceDB ``Reranker`` instance.
 
@@ -166,6 +177,9 @@ def Store(
         if embedding_dim is None:
             embedding_dim = cfg_dim
 
+    if signature is None:
+        signature = get_signature_config()
+
     if reranker is _UNSET:
         reranker_model, reranker_api_key = get_reranker_config()
         if reranker_model is not None:
@@ -182,6 +196,7 @@ def Store(
         table_name=table_name,
         embedding_model=embedding_model,
         embedding_dim=embedding_dim,
+        signature=signature,
         reranker=reranker,
         rerank_limit_multiplier=rerank_limit_multiplier,
     )
