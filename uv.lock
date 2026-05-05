@@ -379,8 +379,8 @@ version = "0.1.1"
 source = { editable = "." }
 dependencies = [
     { name = "dspy" },
-    { name = "httpx" },
     { name = "lancedb" },
+    { name = "litellm" },
     { name = "pyarrow" },
     { name = "pydantic" },
 ]
@@ -399,8 +399,8 @@ dev = [
 [package.metadata]
 requires-dist = [
     { name = "dspy", specifier = ">=3.2.0" },
-    { name = "httpx", specifier = ">=0.28.1" },
     { name = "lancedb", specifier = "<=0.25.3" },
+    { name = "litellm", specifier = ">=1.82.6" },
     { name = "pyarrow", specifier = ">=24.0.0" },
     { name = "pydantic", specifier = ">=2.13.3" },
 ]
