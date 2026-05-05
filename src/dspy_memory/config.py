@@ -1,4 +1,4 @@
-"""Global configuration for DSPy Memory — extraction LM, embedding model, and reranker."""
+"""Global configuration for DSPy Memory — extraction LM, embedding LM, and reranker LM."""
 
 from __future__ import annotations
 
@@ -13,24 +13,19 @@ DEFAULT_EMBEDDING_MODEL = "openrouter/openai/text-embedding-3-small"
 DEFAULT_EMBEDDING_DIM = 1536
 DEFAULT_URI = ".lancedb"
 DEFAULT_TABLE_NAME = "memories"
-# No default reranker — only enabled when explicitly configured.
-DEFAULT_RERANKER_MODEL: str | None = None
 
 # ---------------------------------------------------------------------------
 # Module-level state
 # ---------------------------------------------------------------------------
 
 _lm: dspy.LM | None = None
-_embedding_model: str = DEFAULT_EMBEDDING_MODEL
+_embedding_lm: dspy.LM | None = None
 _embedding_dim: int = DEFAULT_EMBEDDING_DIM
 _uri: str = DEFAULT_URI
 _table_name: str = DEFAULT_TABLE_NAME
-_reranker_model: str | None = DEFAULT_RERANKER_MODEL
-_reranker_api_key: str | None = None
-# Custom extraction signature class.  None → use built-in ExtractMemory.
+_reranker_lm: dspy.LM | None = None
 _signature = None
 
-# Whether configure() has been explicitly called at least once.
 _configured: bool = False
 
 
@@ -43,57 +38,47 @@ def configure(
     *,
     model: str | None = None,
     lm: dspy.LM | None = None,
-    embedding_model: str | None = None,
+    embedding_lm: dspy.LM | None = None,
     embedding_dim: int | None = None,
     uri: str | None = None,
     table_name: str | None = None,
     signature=None,
-    reranker_model: str | None = None,
-    reranker_api_key: str | None = None,
+    reranker_lm: dspy.LM | None = None,
 ) -> dspy.LM | None:
     """Configure DSPy Memory globally.
 
-    Call once at startup to set the LM used for memory extraction, the
-    embedding model, LanceDB defaults, and (optionally) the reranker.
+    Call once at startup.  Every parameter is a ``dspy.LM`` instance.
     Any parameter left as ``None`` keeps the previous value (or default
     if never called).
 
     Parameters
     ----------
     model :
-        Model string passed to ``dspy.LM()``, e.g.
-        ``"openrouter/anthropic/claude-sonnet-4-20250514"``.
+        Model string (alternative to *lm* — creates ``dspy.LM(model)``).
     lm :
-        Pre-constructed ``dspy.LM`` instance.  Takes precedence over *model*.
-    embedding_model :
-        Model for text embeddings, e.g.
-        ``"openrouter/openai/text-embedding-3-small"``.
+        ``dspy.LM`` for memory extraction.
+    embedding_lm :
+        ``dspy.LM`` for generating text embeddings.
     embedding_dim :
-        Output dimension of *embedding_model*.
+        Output dimension of the embedding model (must match the model).
     uri :
-        LanceDB URI (directory path).  Used as default by ``memory.Store()``.
+        LanceDB URI (directory path).  Default for ``memory.Store()``.
     table_name :
-        LanceDB table name.  Used as default by ``memory.Store()``.
+        LanceDB table name.  Default for ``memory.Store()``.
     signature :
-        A DSPy ``Signature`` subclass to use for memory extraction instead of
-        the built-in ``ExtractMemory``.  The signature must have an output
-        field ``memories: list[M]`` where ``M`` has ``.content`` and ``.type``
-        string attributes.
-    reranker_model :
-        Reranker model identifier, e.g. ``"cohere/rerank-4-fast"``.
-        Pass ``None`` to disable reranking.
-    reranker_api_key :
-        API key for the reranker endpoint. Falls back to
-        ``OPENROUTER_API_KEY`` env var if not set.
+        A DSPy ``Signature`` subclass for memory extraction instead of the
+        built-in ``ExtractMemory``.
+    reranker_lm :
+        ``dspy.LM`` identifying the reranker model (e.g. ``dspy.LM("openrouter/cohere/rerank-4-fast")``).
+        ``None`` disables reranking.
 
     Returns
     -------
-    The configured ``dspy.LM`` for extraction, or ``None`` if neither
-    *model* nor *lm* was provided.
+    The configured ``dspy.LM`` for extraction, or ``None`` if not provided.
     """
-    global _lm, _embedding_model, _embedding_dim
+    global _lm, _embedding_lm, _embedding_dim
     global _uri, _table_name
-    global _reranker_model, _reranker_api_key, _signature, _configured
+    global _reranker_lm, _signature, _configured
 
     if lm is not None:
         _lm = lm
@@ -102,8 +87,8 @@ def configure(
         _lm = dspy.LM(model=model)
         dspy.configure(lm=_lm)
 
-    if embedding_model is not None:
-        _embedding_model = embedding_model
+    if embedding_lm is not None:
+        _embedding_lm = embedding_lm
     if embedding_dim is not None:
         _embedding_dim = embedding_dim
     if uri is not None:
@@ -112,10 +97,8 @@ def configure(
         _table_name = table_name
     if signature is not None:
         _signature = signature
-    if reranker_model is not None:
-        _reranker_model = reranker_model
-    if reranker_api_key is not None:
-        _reranker_api_key = reranker_api_key
+    if reranker_lm is not None:
+        _reranker_lm = reranker_lm
 
     _configured = True
     return _lm
@@ -127,7 +110,6 @@ def configure(
 
 
 def get_configured_lm() -> dspy.LM:
-    """Return the configured LM or raise."""
     if _lm is None:
         raise RuntimeError(
             "No language model configured. Call memory.configure() first."
@@ -136,25 +118,20 @@ def get_configured_lm() -> dspy.LM:
 
 
 def get_configured() -> bool:
-    """Whether ``configure()`` has been called at least once."""
     return _configured
 
 
-def get_embedding_config() -> tuple[str, int]:
-    """Return ``(embedding_model, embedding_dim)``."""
-    return _embedding_model, _embedding_dim
+def get_embedding_config() -> tuple[dspy.LM | None, int]:
+    return _embedding_lm, _embedding_dim
 
 
 def get_store_config() -> tuple[str, str]:
-    """Return ``(uri, table_name)``."""
     return _uri, _table_name
 
 
-def get_reranker_config() -> tuple[str | None, str | None]:
-    """Return ``(reranker_model, reranker_api_key)`` — both may be ``None``."""
-    return _reranker_model, _reranker_api_key
+def get_reranker_lm_config() -> dspy.LM | None:
+    return _reranker_lm
 
 
 def get_signature_config():
-    """Return the configured signature class, or ``None`` (use built-in)."""
     return _signature
