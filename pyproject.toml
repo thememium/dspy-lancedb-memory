@@ -5,7 +5,12 @@ description = "Add your description here"
 readme = "README.md"
 authors = [{ name = "Edward Boswell", email = "thememium@gmail.com" }]
 requires-python = ">=3.12"
-dependencies = []
+dependencies = [
+    "dspy>=3.2.0",
+    "httpx>=0.28.1",
+    "lancedb<=0.25.3",
+    "pydantic>=2.13.3",
+]
 
 [project.scripts]
 dspy-memory = "dspy_memory:main"
