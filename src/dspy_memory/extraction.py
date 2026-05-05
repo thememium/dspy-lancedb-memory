@@ -29,22 +29,29 @@ class ExtractMemory(dspy.Signature):
 
 
 class MemoryExtractor(dspy.Module):
-    """Wraps ExtractMemory in ChainOfThought for reliable extraction.
+    """Wraps a DSPy Signature in ChainOfThought for reliable memory extraction.
 
-    Requires ``memory.configure()`` to have been called before first use.
+    Parameters
+    ----------
+    signature :
+        A DSPy ``Signature`` class whose output field is a ``list[Model]``
+        where each model has ``.content`` (str) and ``.type`` (str).
+        Defaults to :class:`ExtractMemory`.
     """
 
-    def __init__(self):
+    def __init__(self, signature=ExtractMemory):
         super().__init__()
-        self.extract = dspy.ChainOfThought(ExtractMemory)
+        self.extract = dspy.ChainOfThought(signature)
 
-    def forward(self, messages: list[dict[str, str]]) -> list[tuple[str, MemoryType]]:
+    def forward(
+        self, messages: list[dict[str, str]]
+    ) -> list[tuple[str, MemoryType | str]]:
         prediction: dspy.Prediction = self.extract(messages=messages)
         items: list[MemoryItem] = prediction.memories
         if not isinstance(items, list):
             items = [items]
 
-        cleaned: list[tuple[str, MemoryType]] = []
+        cleaned: list[tuple[str, MemoryType | str]] = []
         for item in items:
             content = item.content.strip()
             if not content:
