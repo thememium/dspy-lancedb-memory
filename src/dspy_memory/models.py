@@ -47,8 +47,8 @@ class MemoryItem(BaseModel):
     """
 
 
-def memory_type_from_string(value: MemoryType | str | None) -> MemoryType:
-    """Coerce a raw value into a MemoryType enum member, defaulting to SEMANTIC."""
+def memory_type_from_string(value: MemoryType | str | None) -> MemoryType | str:
+    """Coerce a raw value into a ``MemoryType`` enum member or pass through custom types."""
     if isinstance(value, MemoryType):
         return value
     if not value:
@@ -56,4 +56,4 @@ def memory_type_from_string(value: MemoryType | str | None) -> MemoryType:
     for member in MemoryType:
         if member.value == value.lower():
             return member
-    return MemoryType.SEMANTIC
+    return value  # pass through unrecognised / custom types as-is
