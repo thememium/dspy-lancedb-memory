@@ -381,6 +381,7 @@ dependencies = [
     { name = "dspy" },
     { name = "httpx" },
     { name = "lancedb" },
+    { name = "pyarrow" },
     { name = "pydantic" },
 ]
 
@@ -400,6 +401,7 @@ requires-dist = [
     { name = "dspy", specifier = ">=3.2.0" },
     { name = "httpx", specifier = ">=0.28.1" },
     { name = "lancedb", specifier = "<=0.25.3" },
+    { name = "pyarrow", specifier = ">=24.0.0" },
     { name = "pydantic", specifier = ">=2.13.3" },
 ]
 
