@@ -89,7 +89,7 @@ import dspy
 memory.configure(
     extraction_lm=dspy.LM("openrouter/openai/gpt-4o-mini"),
     embedding_lm=dspy.LM("openrouter/openai/text-embedding-3-small"),
-        reranker_lm=dspy.LM("openrouter/cohere/rerank-4-fast"),   # optional — omit to disable
+    reranker_lm=dspy.LM("openrouter/cohere/rerank-4-fast"),   # optional — omit to disable
 )
 
 # Create a store — picks up all defaults from configure()
