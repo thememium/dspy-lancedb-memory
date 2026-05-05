@@ -42,7 +42,11 @@ class LanceDSPyMemoryStore:
 
     def _embed(self, text: str) -> list[float]:
         # DSPy Embedder accepts a list[str] and returns a 2D embedding array/list.
-        return list(self.embedder([text])[0])
+        # Convert to native Python floats for LanceDB compatibility.
+        return [float(v) for v in self.embedder([text])[0]]
+
+    def _embed_many(self, texts: list[str]) -> list[list[float]]:
+        return [[float(v) for v in row] for row in self.embedder(texts)]
 
     def _get_or_create_table(self):
         if self.table_name in self.db.table_names():
@@ -274,14 +278,15 @@ class LanceDSPyMemoryStore:
         return self._without_vectors(results)
 
     def update_memory(self, *, memory_id: str, content: str) -> None:
-        self.table.update(
-            where=f"id = '{memory_id}'",
-            values={
-                "content": content,
-                "updated_at": datetime.now(timezone.utc).isoformat(),
-                "vector": self._embed(content),
-            },
-        )
+        old = self.table.search().where(f"id = '{memory_id}'").to_list()
+        if not old:
+            return
+        row = dict(old[0])
+        row["content"] = content
+        row["updated_at"] = datetime.now(timezone.utc).isoformat()
+        row["vector"] = self._embed(content)
+        self.table.delete(f"id = '{memory_id}'")
+        self.table.add([row])
 
     def delete_memory(self, *, memory_id: str) -> None:
         self.table.delete(f"id = '{memory_id}'")
