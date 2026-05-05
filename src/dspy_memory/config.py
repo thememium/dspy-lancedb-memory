@@ -37,7 +37,7 @@ _configured: bool = False
 def configure(
     *,
     model: str | None = None,
-    lm: dspy.LM | None = None,
+    extraction_lm: dspy.LM | None = None,
     embedding_lm: dspy.LM | None = None,
     embedding_dim: int | None = None,
     uri: str | None = None,
@@ -54,8 +54,8 @@ def configure(
     Parameters
     ----------
     model :
-        Model string (alternative to *lm* — creates ``dspy.LM(model)``).
-    lm :
+        Model string (alternative to *extraction_lm* — creates ``dspy.LM(model)``).
+    extraction_lm :
         ``dspy.LM`` for memory extraction.
     embedding_lm :
         ``dspy.LM`` for generating text embeddings.
@@ -80,9 +80,9 @@ def configure(
     global _uri, _table_name
     global _reranker_lm, _signature, _configured
 
-    if lm is not None:
-        _lm = lm
-        dspy.configure(lm=lm)
+    if extraction_lm is not None:
+        _lm = extraction_lm
+        dspy.configure(lm=extraction_lm)
     elif model is not None:
         _lm = dspy.LM(model=model)
         dspy.configure(lm=_lm)

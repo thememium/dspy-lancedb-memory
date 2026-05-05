@@ -87,7 +87,7 @@ import dspy
 
 # Configure: extraction LM, embedding LM, and optional reranker LM
 memory.configure(
-    lm=dspy.LM("openrouter/openai/gpt-4o-mini"),
+    extraction_lm=dspy.LM("openrouter/openai/gpt-4o-mini"),
     embedding_lm=dspy.LM("openrouter/openai/text-embedding-3-small"),
     reranker_lm=dspy.LM("openrouter/cohere/rerank-4-fast"),   # optional — omit to disable reranking
 )
@@ -119,7 +119,7 @@ The real power is automatic extraction. Pass a conversation turn and the LLM ext
 from dspy_memory import memory
 import dspy
 
-memory.configure(lm=dspy.LM("openrouter/openai/gpt-4o-mini"))
+memory.configure(extraction_lm=dspy.LM("openrouter/openai/gpt-4o-mini"))
 store = memory.Store()
 
 messages = [
@@ -153,7 +153,7 @@ from dspy_memory import memory
 import dspy
 
 memory.configure(
-    lm=dspy.LM("openrouter/openai/gpt-4o-mini"),
+    extraction_lm=dspy.LM("openrouter/openai/gpt-4o-mini"),
     reranker_lm=dspy.LM("openrouter/cohere/rerank-4-fast"),
 )
 store = memory.Store()
@@ -203,7 +203,7 @@ from dspy_memory import memory
 import dspy
 
 memory.configure(
-    lm=dspy.LM("openrouter/openai/gpt-4o-mini"),
+    extraction_lm=dspy.LM("openrouter/openai/gpt-4o-mini"),
     reranker_lm=dspy.LM("openrouter/cohere/rerank-4-fast"),
 )
 store = memory.Store()  # reranker auto-created from configure()
@@ -236,7 +236,7 @@ from dspy_memory import memory
 import dspy
 
 memory.configure(
-    lm=dspy.LM("openrouter/anthropic/claude-sonnet-4-20250514"),                  # extraction LM
+    extraction_lm=dspy.LM("openrouter/anthropic/claude-sonnet-4-20250514"),           # extraction LM
     embedding_lm=dspy.LM("openrouter/openai/text-embedding-3-small"),              # embedding LM
     embedding_dim=1536,                                                             # must match
     reranker_lm=dspy.LM("openrouter/cohere/rerank-4-fast"),                         # reranker LM

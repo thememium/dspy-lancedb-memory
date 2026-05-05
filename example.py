@@ -12,7 +12,7 @@ from dspy_memory import memory
 # ===========================================================================
 
 memory.configure(
-    lm=dspy.LM("openrouter/openai/gpt-4o-mini"),
+    extraction_lm=dspy.LM("openrouter/openai/gpt-4o-mini"),
     embedding_lm=dspy.LM("openrouter/openai/text-embedding-3-small"),
     reranker_lm=dspy.LM("openrouter/cohere/rerank-4-fast"),
 )

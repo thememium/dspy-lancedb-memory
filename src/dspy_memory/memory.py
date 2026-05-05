@@ -9,7 +9,7 @@ Usage
 
     # 1. Configure once — everything is a dspy.LM
     memory.configure(
-        lm=dspy.LM("openrouter/anthropic/claude-sonnet-4-20250514"),
+        extraction_lm=dspy.LM("openrouter/anthropic/claude-sonnet-4-20250514"),
         embedding_lm=dspy.LM("openrouter/openai/text-embedding-3-small"),
         reranker_lm=dspy.LM("openrouter/cohere/rerank-4-fast"),
     )
@@ -55,7 +55,7 @@ _UNSET: Any = object()
 def configure(
     *,
     model: str | None = None,
-    lm=None,
+    extraction_lm=None,
     embedding_lm: dspy.LM | None = None,
     embedding_dim: int | None = None,
     uri: str | None = None,
@@ -71,8 +71,8 @@ def configure(
     Parameters
     ----------
     model :
-        Model string (alternative to *lm* — creates ``dspy.LM(model)``).
-    lm :
+        Model string (alternative to *extraction_lm* — creates ``dspy.LM(model)``).
+    extraction_lm :
         ``dspy.LM`` for memory extraction.
     embedding_lm :
         ``dspy.LM`` for text embeddings.
@@ -95,7 +95,7 @@ def configure(
         import dspy
 
         memory.configure(
-            lm=dspy.LM("openrouter/anthropic/claude-sonnet-4-20250514"),
+            extraction_lm=dspy.LM("openrouter/anthropic/claude-sonnet-4-20250514"),
             embedding_lm=dspy.LM("openrouter/openai/text-embedding-3-small"),
             reranker_lm=dspy.LM("openrouter/cohere/rerank-4-fast"),
             uri=".my_memories",
@@ -104,7 +104,7 @@ def configure(
     """
     _configure(
         model=model,
-        lm=lm,
+        extraction_lm=extraction_lm,
         embedding_lm=embedding_lm,
         embedding_dim=embedding_dim,
         uri=uri,
