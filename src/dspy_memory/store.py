@@ -52,6 +52,7 @@ class LanceDSPyMemoryStore:
             [
                 pa.field("id", pa.string()),
                 pa.field("user_id", pa.string()),
+                pa.field("session_id", pa.string()),
                 pa.field("conversation_id", pa.string()),
                 pa.field("memory_type", pa.string()),
                 pa.field("content", pa.string()),
@@ -68,6 +69,7 @@ class LanceDSPyMemoryStore:
                 {
                     "id": "__seed__",
                     "user_id": "__seed__",
+                    "session_id": "__seed__",
                     "conversation_id": "__seed__",
                     "memory_type": "seed",
                     "content": "seed",
@@ -85,7 +87,8 @@ class LanceDSPyMemoryStore:
         *,
         user_id: str,
         content: str,
-        conversation_id: str,
+        session_id: str = "",
+        conversation_id: str = "",
         memory_type: MemoryType | str,
         metadata: dict[str, Any] | None,
     ) -> dict[str, Any]:
@@ -100,6 +103,7 @@ class LanceDSPyMemoryStore:
         return {
             "id": str(uuid.uuid4()),
             "user_id": user_id,
+            "session_id": session_id,
             "conversation_id": conversation_id,
             "memory_type": type_value,
             "content": content,
@@ -125,6 +129,7 @@ class LanceDSPyMemoryStore:
         *,
         user_id: str,
         contents: list[dict[str, str]] | None = None,
+        session_id: str = "",
         conversation_id: str = "",
         extract: bool = True,
         memory_type: MemoryType | str | None = None,
@@ -140,8 +145,10 @@ class LanceDSPyMemoryStore:
         contents : list[dict[str, str]] | None
             A conversation turn in standard ``{"role": ..., "content": ...}`` format.
             Required when *extract* is ``True`` (default).
+        session_id : str
+            Optional session / thread identifier for grouping.
         conversation_id : str
-            Optional grouping key (e.g. thread / session ID).
+            Optional grouping key (e.g. conversation / dialogue ID).
         extract : bool
             When ``True``, a DSPy Signature is used to extract **all** salient
             memories from *contents*. When ``False``, *contents* must contain
@@ -170,6 +177,7 @@ class LanceDSPyMemoryStore:
             stored = [
                 self.create_memory(
                     user_id=user_id,
+                    session_id=session_id,
                     conversation_id=conversation_id,
                     content=content,
                     memory_type=(
@@ -190,6 +198,7 @@ class LanceDSPyMemoryStore:
 
         row = self.create_memory(
             user_id=user_id,
+            session_id=session_id,
             conversation_id=conversation_id,
             content=contents[0]["content"],
             memory_type=(
@@ -206,6 +215,7 @@ class LanceDSPyMemoryStore:
         *,
         user_id: str,
         content: str,
+        session_id: str = "",
         conversation_id: str = "",
         memory_type: MemoryType | str = MemoryType.SEMANTIC,
         metadata: dict[str, Any] | None = None,
@@ -213,6 +223,7 @@ class LanceDSPyMemoryStore:
         row = self._build_memory_row(
             user_id=user_id,
             content=content,
+            session_id=session_id,
             conversation_id=conversation_id,
             memory_type=memory_type,
             metadata=metadata,
@@ -225,12 +236,16 @@ class LanceDSPyMemoryStore:
         *,
         user_id: str,
         query: str,
+        session_id: str | None = None,
         conversation_id: str | None = None,
         memory_type: MemoryType | str | None = None,
         limit: int = 5,
         use_reranker: bool = False,
     ) -> list[dict[str, Any]]:
         filters = [f"user_id = '{user_id}'"]
+
+        if session_id:
+            filters.append(f"session_id = '{session_id}'")
 
         if conversation_id:
             filters.append(f"conversation_id = '{conversation_id}'")
