@@ -122,27 +122,27 @@ class LanceDSPyMemoryStore:
         self,
         *,
         user_id: str,
-        messages: list[dict[str, str]] | None = None,
+        contents: list[dict[str, str]] | None = None,
         conversation_id: str = "",
         extract: bool = True,
         memory_type: MemoryType | str | None = None,
         metadata: dict[str, Any] | None = None,
     ) -> list[dict[str, Any]]:
         """
-        Store content for a user — either raw or extracted from conversation messages.
+        Store content for a user — either raw or extracted from conversation.
 
         Parameters
         ----------
         user_id : str
             Arbitrary identifier for the user this memory belongs to.
-        messages : list[dict[str, str]] | None
+        contents : list[dict[str, str]] | None
             A conversation turn in standard ``{"role": ..., "content": ...}`` format.
             Required when *extract* is ``True`` (default).
         conversation_id : str
             Optional grouping key (e.g. thread / session ID).
         extract : bool
             When ``True``, a DSPy Signature is used to extract **all** salient
-            memories from the messages. When ``False``, ``messages`` must contain
+            memories from *contents*. When ``False``, *contents* must contain
             exactly one item which is stored verbatim.
         memory_type : MemoryType | str | None
             Force a specific memory category. If ``None`` while *extract* is ``True``,
@@ -157,12 +157,12 @@ class LanceDSPyMemoryStore:
             The full rows that were written to LanceDB.
         """
         if extract:
-            if not messages:
-                raise ValueError("messages are required when extract=True")
+            if not contents:
+                raise ValueError("contents is required when extract=True")
 
             extractor = MemoryExtractor(signature=self._extraction_signature)
             extracted: list[tuple[str, MemoryType | str]] = extractor.forward(
-                messages=messages
+                messages=contents
             )
 
             stored = [
@@ -181,15 +181,15 @@ class LanceDSPyMemoryStore:
             ]
             return self._without_vectors(stored)
 
-        if not messages or len(messages) != 1:
+        if not contents or len(contents) != 1:
             raise ValueError(
-                "verbatim (extract=False) requires exactly one message in messages"
+                "verbatim (extract=False) requires exactly one item in contents"
             )
 
         row = self.create_memory(
             user_id=user_id,
             conversation_id=conversation_id,
-            content=messages[0]["content"],
+            content=contents[0]["content"],
             memory_type=(
                 memory_type_from_string(memory_type)
                 if memory_type is not None
