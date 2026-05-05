@@ -339,7 +339,7 @@ When storing directly (without extraction), the default type is `semantic`.
 ## Available API
 
 | API | Description |
-|---|---|---|
+|---|---|
 | [`memory`](#basic-usage) | SDK module — ``memory.configure()`` and ``memory.Store()`` |
 | [`MemoryExtractor`](#extract-memories-from-conversation) | DSPy `ChainOfThought` module for memory extraction |
 | [`LiteLLMReranker`](#using-the-reranker) | Cross-encoder reranker via ``litellm.rerank()`` — supports Cohere, Jina, OpenRouter, and more |
