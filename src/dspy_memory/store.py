@@ -18,7 +18,7 @@ class LanceDSPyMemoryStore:
         self,
         uri: str = ".lancedb",
         table_name: str = "memories",
-        embedding_model: str = "openrouter/openai/text-embedding-3-small",
+        embedding_lm=None,
         embedding_dim: int = 1536,
         signature=None,
         reranker: Reranker | None = None,
@@ -29,8 +29,10 @@ class LanceDSPyMemoryStore:
         self.embedding_dim = embedding_dim
         self.rerank_limit_multiplier = max(rerank_limit_multiplier, 1)
 
+        if embedding_lm is None:
+            embedding_lm = dspy.LM("openrouter/openai/text-embedding-3-small")
         self.embedder = dspy.Embedder(
-            embedding_model,
+            embedding_lm.model,
             caching=True,
         )
         self.reranker = reranker
