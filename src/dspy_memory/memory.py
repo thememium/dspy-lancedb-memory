@@ -5,12 +5,13 @@ Usage
 ::
 
     from dspy_memory import memory
+    import dspy
 
-    # 1. Configure once
+    # 1. Configure once — everything is a dspy.LM
     memory.configure(
         lm=dspy.LM("openrouter/anthropic/claude-sonnet-4-20250514"),
-        embedding_model="openrouter/openai/text-embedding-3-small",
-        reranker_model="cohere/rerank-4-fast",
+        embedding_lm=dspy.LM("openrouter/openai/text-embedding-3-small"),
+        reranker_lm=dspy.LM("openrouter/cohere/rerank-4-fast"),
     )
 
     # 2. Create a store
@@ -25,12 +26,14 @@ from __future__ import annotations
 
 from typing import Any
 
+import dspy
 from lancedb.rerankers import Reranker
 
+from dspy_memory.config import DEFAULT_EMBEDDING_MODEL
 from dspy_memory.config import configure as _configure
 from dspy_memory.config import (
     get_embedding_config,
-    get_reranker_config,
+    get_reranker_lm_config,
     get_signature_config,
     get_store_config,
 )
@@ -53,13 +56,12 @@ def configure(
     *,
     model: str | None = None,
     lm=None,
-    embedding_model: str | None = None,
+    embedding_lm: dspy.LM | None = None,
     embedding_dim: int | None = None,
     uri: str | None = None,
     table_name: str | None = None,
     signature=None,
-    reranker_model: str | None = None,
-    reranker_api_key: str | None = None,
+    reranker_lm: dspy.LM | None = None,
 ):
     """Configure DSPy Memory globally.
 
@@ -69,35 +71,33 @@ def configure(
     Parameters
     ----------
     model :
-        Model string (e.g. ``"openrouter/anthropic/claude-sonnet-4-20250514"``).
+        Model string (alternative to *lm* — creates ``dspy.LM(model)``).
     lm :
-        Pre-built ``dspy.LM``.  Takes precedence over *model*.
-    embedding_model :
-        Embedding model (e.g. ``"openrouter/openai/text-embedding-3-small"``).
+        ``dspy.LM`` for memory extraction.
+    embedding_lm :
+        ``dspy.LM`` for text embeddings.
     embedding_dim :
-        Output dimension of *embedding_model* (must match).
+        Output dimension of the embedding model (must match).
     uri :
         LanceDB URI (directory path).  Fallback for ``Store()``.
     table_name :
         LanceDB table name.  Fallback for ``Store()``.
     signature :
-        A DSPy ``Signature`` subclass for memory extraction.  The signature
-        must have ``memories: list[M]`` as its output field where ``M`` has
-        ``.content`` and ``.type`` string attributes.
-    reranker_model :
-        Reranker model identifier
-        (e.g. ``"cohere/rerank-4-fast"``).  ``None`` disables reranking.
-    reranker_api_key :
-        API key for the reranker.  Falls back to ``OPENROUTER_API_KEY`` env var.
+        A DSPy ``Signature`` subclass for memory extraction.
+    reranker_lm :
+        ``dspy.LM`` identifying the reranker model
+        (e.g. ``dspy.LM("openrouter/cohere/rerank-4-fast")``).
 
     Example
     -------
     ::
 
+        import dspy
+
         memory.configure(
-            model="openrouter/anthropic/claude-sonnet-4-20250514",
-            embedding_model="openrouter/openai/text-embedding-3-small",
-            reranker_model="cohere/rerank-4-fast",
+            lm=dspy.LM("openrouter/anthropic/claude-sonnet-4-20250514"),
+            embedding_lm=dspy.LM("openrouter/openai/text-embedding-3-small"),
+            reranker_lm=dspy.LM("openrouter/cohere/rerank-4-fast"),
             uri=".my_memories",
             table_name="user_data",
         )
@@ -105,13 +105,12 @@ def configure(
     _configure(
         model=model,
         lm=lm,
-        embedding_model=embedding_model,
+        embedding_lm=embedding_lm,
         embedding_dim=embedding_dim,
         uri=uri,
         table_name=table_name,
         signature=signature,
-        reranker_model=reranker_model,
-        reranker_api_key=reranker_api_key,
+        reranker_lm=reranker_lm,
     )
 
 
@@ -123,9 +122,10 @@ def configure(
 def Store(
     uri: str | None | Any = _UNSET,
     table_name: str | None | Any = _UNSET,
-    embedding_model: str | None = None,
+    embedding_lm=None,
     embedding_dim: int | None = None,
     signature=None,
+    reranker_lm=None,
     reranker: Reranker | None | Any = _UNSET,
     rerank_limit_multiplier: int = 10,
 ) -> LanceDSPyMemoryStore:
@@ -134,29 +134,29 @@ def Store(
     Parameters
     ----------
     uri :
-        LanceDB URI (directory path on disk).  Falls back to the value set
-        in :func:`configure`, then to ``".lancedb"``.
+        LanceDB URI.  Falls back to :func:`configure`, then ``".lancedb"``.
     table_name :
-        Name of the LanceDB table.  Falls back to :func:`configure`, then
-        to ``"memories"``.
-    embedding_model :
-        Override the embedding model.  Falls back to the value set in
-        :func:`configure` when ``None``.
+        LanceDB table name.  Falls back to :func:`configure`, then ``"memories"``.
+    embedding_lm :
+        ``dspy.LM`` for embeddings.  Falls back to :func:`configure`, then
+        ``dspy.LM("openrouter/openai/text-embedding-3-small")``.
     embedding_dim :
-        Override the embedding dimension.  Falls back to :func:`configure` value.
+        Embedding dimension.  Falls back to :func:`configure`, then ``1536``.
     signature :
-        Custom DSPy ``Signature`` subclass for extraction.  Falls back to
-        :func:`configure`, then to the built-in ``ExtractMemory``.
+        Custom DSPy ``Signature`` for extraction.  Falls back to
+        :func:`configure`, then the built-in ``ExtractMemory``.
+    reranker_lm :
+        ``dspy.LM`` identifying the reranker model.  Falls back to
+        :func:`configure`.
     reranker :
-        A LanceDB ``Reranker`` instance.
+        A LanceDB ``Reranker`` instance.  Takes precedence over
+        *reranker_lm*.
 
-        * **Not passed** — reads *reranker_model* from :func:`configure` and,
-          if set, auto-creates an ``OpenRouterReranker``.
+        * **Not passed** — uses *reranker_lm* if available.
         * ``None`` — explicitly disable reranking.
         * ``Reranker`` instance — use as-is.
     rerank_limit_multiplier :
-        How many extra rows to fetch from vector search (before reranking
-        trims back to the requested ``limit``).
+        Extra candidates to fetch before reranking trims to ``limit``.
 
     Returns
     -------
@@ -170,23 +170,24 @@ def Store(
             table_name = cfg_table
     assert isinstance(uri, str) and isinstance(table_name, str)
 
-    if embedding_model is None or embedding_dim is None:
-        cfg_embed, cfg_dim = get_embedding_config()
-        if embedding_model is None:
-            embedding_model = cfg_embed
+    if embedding_lm is None or embedding_dim is None:
+        cfg_lm, cfg_dim = get_embedding_config()
+        if embedding_lm is None:
+            embedding_lm = cfg_lm or dspy.LM(DEFAULT_EMBEDDING_MODEL)
         if embedding_dim is None:
             embedding_dim = cfg_dim
 
     if signature is None:
         signature = get_signature_config()
 
+    if reranker_lm is None:
+        reranker_lm = get_reranker_lm_config()
+
     if reranker is _UNSET:
-        reranker_model, reranker_api_key = get_reranker_config()
-        if reranker_model is not None:
+        if reranker_lm is not None:
             reranker = OpenRouterReranker(
-                model=reranker_model,
+                model=reranker_lm.model,
                 column="content",
-                api_key=reranker_api_key,
             )
         else:
             reranker = None
@@ -194,7 +195,7 @@ def Store(
     return LanceDSPyMemoryStore(
         uri=uri,
         table_name=table_name,
-        embedding_model=embedding_model,
+        embedding_lm=embedding_lm,
         embedding_dim=embedding_dim,
         signature=signature,
         reranker=reranker,
