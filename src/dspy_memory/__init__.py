@@ -1,5 +1,13 @@
-def main() -> None:
-    print("Hello from dspy-memory!")
+from .extraction import ExtractMemory, MemoryExtractor
+from .models import MemoryItem, MemoryType
+from .reranking import OpenRouterReranker
+from .store import LanceDSPyMemoryStore
 
-if __name__ == "__main__":
-    main()
+__all__ = [
+    "ExtractMemory",
+    "LanceDSPyMemoryStore",
+    "MemoryExtractor",
+    "MemoryItem",
+    "MemoryType",
+    "OpenRouterReranker",
+]
