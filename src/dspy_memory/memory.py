@@ -7,11 +7,11 @@ Usage
     from dspy_memory import memory
     import dspy
 
-    # 1. Configure once — everything is a dspy.LM
+    # 1. Configure once
     memory.configure(
         extraction_lm=dspy.LM("openrouter/anthropic/claude-sonnet-4-20250514"),
         embedding_lm=dspy.LM("openrouter/openai/text-embedding-3-small"),
-        reranker_lm=dspy.LM("openrouter/cohere/rerank-4-fast"),
+        reranker_model="cohere/rerank-english-v3.0",
     )
 
     # 2. Create a store
@@ -33,11 +33,11 @@ from dspy_memory.config import DEFAULT_EMBEDDING_MODEL
 from dspy_memory.config import configure as _configure
 from dspy_memory.config import (
     get_embedding_config,
-    get_reranker_lm_config,
+    get_reranker_model_config,
     get_signature_config,
     get_store_config,
 )
-from dspy_memory.reranking import OpenRouterReranker
+from dspy_memory.reranking import LiteLLMReranker
 from dspy_memory.store import LanceDSPyMemoryStore
 
 # ---------------------------------------------------------------------------
@@ -61,7 +61,7 @@ def configure(
     uri: str | None = None,
     table_name: str | None = None,
     signature=None,
-    reranker_lm: dspy.LM | None = None,
+    reranker_model: str | None = None,
 ):
     """Configure DSPy Memory globally.
 
@@ -84,9 +84,10 @@ def configure(
         LanceDB table name.  Fallback for ``Store()``.
     signature :
         A DSPy ``Signature`` subclass for memory extraction.
-    reranker_lm :
-        ``dspy.LM`` identifying the reranker model
-        (e.g. ``dspy.LM("openrouter/cohere/rerank-4-fast")``).
+    reranker_model :
+        Model string for the reranker (e.g. ``"cohere/rerank-english-v3.0"``).
+        Uses ``litellm.rerank()`` internally — supports the same
+        ``provider/model`` format as ``dspy.LM``.
 
     Example
     -------
@@ -97,7 +98,7 @@ def configure(
         memory.configure(
             extraction_lm=dspy.LM("openrouter/anthropic/claude-sonnet-4-20250514"),
             embedding_lm=dspy.LM("openrouter/openai/text-embedding-3-small"),
-            reranker_lm=dspy.LM("openrouter/cohere/rerank-4-fast"),
+            reranker_model="cohere/rerank-english-v3.0",
             uri=".my_memories",
             table_name="user_data",
         )
@@ -110,7 +111,7 @@ def configure(
         uri=uri,
         table_name=table_name,
         signature=signature,
-        reranker_lm=reranker_lm,
+        reranker_model=reranker_model,
     )
 
 
@@ -125,7 +126,7 @@ def Store(
     embedding_lm=None,
     embedding_dim: int | None = None,
     signature=None,
-    reranker_lm=None,
+    reranker_model: str | None = None,
     reranker: Reranker | None | Any = _UNSET,
     rerank_limit_multiplier: int = 10,
 ) -> LanceDSPyMemoryStore:
@@ -145,14 +146,14 @@ def Store(
     signature :
         Custom DSPy ``Signature`` for extraction.  Falls back to
         :func:`configure`, then the built-in ``ExtractMemory``.
-    reranker_lm :
-        ``dspy.LM`` identifying the reranker model.  Falls back to
-        :func:`configure`.
+    reranker_model :
+        Model string for ``LiteLLMReranker``.  Falls back to
+        :func:`configure`.  Ignored if *reranker* is passed.
     reranker :
         A LanceDB ``Reranker`` instance.  Takes precedence over
-        *reranker_lm*.
+        *reranker_model*.
 
-        * **Not passed** — uses *reranker_lm* if available.
+        * **Not passed** — creates a ``LiteLLMReranker`` from *reranker_model*.
         * ``None`` — explicitly disable reranking.
         * ``Reranker`` instance — use as-is.
     rerank_limit_multiplier :
@@ -180,13 +181,13 @@ def Store(
     if signature is None:
         signature = get_signature_config()
 
-    if reranker_lm is None:
-        reranker_lm = get_reranker_lm_config()
+    if reranker_model is None:
+        reranker_model = get_reranker_model_config()
 
     if reranker is _UNSET:
-        if reranker_lm is not None:
-            reranker = OpenRouterReranker(
-                lm=reranker_lm,
+        if reranker_model is not None:
+            reranker = LiteLLMReranker(
+                model=reranker_model,
                 column="content",
             )
         else:

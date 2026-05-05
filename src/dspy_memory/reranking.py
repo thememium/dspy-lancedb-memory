@@ -1,56 +1,33 @@
 import logging
-import os
 from typing import Any
 
-import dspy
-import httpx
 import pyarrow as pa
 from lancedb.rerankers import Reranker
+from litellm import rerank
 
 logger = logging.getLogger("dspy_memory")
 
 
-class OpenRouterReranker(Reranker):
-    """Reranker that calls the OpenRouter /rerank endpoint (Cohere-compatible).
+class LiteLLMReranker(Reranker):
+    """Reranker that uses ``litellm.rerank()`` for cross-encoder reranking.
 
-    Accepts a ``dspy.LM`` directly so callers don't need to handle model
-    strings or API keys separately.
+    Supports any provider with a rerank endpoint (Cohere, Jina, OpenRouter,
+    etc.) through LiteLLM's model routing — just use the standard
+    ``"provider/model"`` format (e.g. ``"cohere/rerank-english-v3.0"``,
+    ``"openrouter/cohere/rerank-4-fast"``).
     """
 
     def __init__(
         self,
-        model: str = "cohere/rerank-4-fast",
+        model: str = "cohere/rerank-english-v3.0",
         column: str = "text",
         top_n: int | None = None,
-        api_key: str | None = None,
-        lm: dspy.LM | None = None,
         return_score: str = "relevance",
     ):
         super().__init__(return_score)
+        self.model = model
         self.column = column
         self.top_n = top_n
-        self.api_key = api_key or os.environ.get("OPENROUTER_API_KEY")
-
-        if lm is not None:
-            self.model = lm.model
-            # The ``dspy.LM`` stores the provider prefix (e.g. ``openrouter/cohere/...``)
-            # but the OpenRouter /rerank endpoint expects the bare model name
-            # (e.g. ``cohere/rerank-4-fast``).  Strip the known prefix.
-            if "/" in (lm._provider_name or ""):
-                # multi-part provider → assume the model string is already bare
-                pass
-            elif self.model.startswith(f"{lm._provider_name}/"):
-                self.model = self.model[len(lm._provider_name) + 1 :]
-            # Fall back to api_key from the LM's kwargs if not set otherwise
-            if self.api_key is None and hasattr(lm, "kwargs"):
-                self.api_key = lm.kwargs.get("api_key") or lm.kwargs.get("api_key")
-        else:
-            self.model = model
-
-        if not self.api_key:
-            raise ValueError(
-                "OPENROUTER_API_KEY not set. Pass api_key=... or set the env var."
-            )
 
     # ------------------------------------------------------------------
     # Internal helpers
@@ -62,39 +39,41 @@ class OpenRouterReranker(Reranker):
             return result_set
 
         docs = result_set[self.column].to_pylist()
-        payload: dict[str, Any] = {
-            "model": self.model,
-            "query": query,
-            "documents": docs,
-        }
-        if self.top_n is not None:
-            payload["top_n"] = self.top_n
 
         try:
-            response = httpx.post(
-                "https://openrouter.ai/api/v1/rerank",
-                headers={
-                    "Authorization": f"Bearer {self.api_key}",
-                    "Content-Type": "application/json",
-                },
-                json=payload,
-                timeout=60.0,
+            response: Any = rerank(
+                model=self.model,
+                query=query,
+                documents=docs,
+                top_n=self.top_n,
             )
-            response.raise_for_status()
         except Exception as exc:
             logger.warning(
-                "Reranker call failed (%s); returning original results.", exc
+                "Reranker call failed (%s); returning original results.",
+                exc,
             )
-            return result_set
+            return self._attach_fallback_scores(result_set)
 
-        data = response.json()
-        results = data["results"]
+        results = response["results"]
         indices, scores = zip(*[(r["index"], r["relevance_score"]) for r in results])
         result_set = result_set.take(list(indices))
         result_set = result_set.append_column(
-            "_relevance_score", pa.array(scores, type=pa.float32())
+            "_relevance_score",
+            pa.array(scores, type=pa.float32()),
         )
         return result_set
+
+    def _attach_fallback_scores(self, result_set: pa.Table) -> pa.Table:
+        """Add ``_relevance_score`` so LanceDB's post-rerank validation passes."""
+        if "_distance" in result_set.column_names:
+            dist = result_set["_distance"].to_pylist()
+            scores = [1.0 / (1.0 + d) for d in dist]
+        else:
+            scores = [0.0] * len(result_set)
+        return result_set.append_column(
+            "_relevance_score",
+            pa.array(scores, type=pa.float32()),
+        )
 
     # ------------------------------------------------------------------
     # LanceDB reranker interface

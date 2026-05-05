@@ -1,4 +1,4 @@
-"""Global configuration for DSPy Memory — extraction LM, embedding LM, and reranker LM."""
+"""Global configuration for DSPy Memory — extraction LM, embedding LM, and reranker."""
 
 from __future__ import annotations
 
@@ -23,7 +23,7 @@ _embedding_lm: dspy.LM | None = None
 _embedding_dim: int = DEFAULT_EMBEDDING_DIM
 _uri: str = DEFAULT_URI
 _table_name: str = DEFAULT_TABLE_NAME
-_reranker_lm: dspy.LM | None = None
+_reranker_model: str | None = None
 _signature = None
 
 _configured: bool = False
@@ -43,13 +43,12 @@ def configure(
     uri: str | None = None,
     table_name: str | None = None,
     signature=None,
-    reranker_lm: dspy.LM | None = None,
+    reranker_model: str | None = None,
 ) -> dspy.LM | None:
     """Configure DSPy Memory globally.
 
-    Call once at startup.  Every parameter is a ``dspy.LM`` instance.
-    Any parameter left as ``None`` keeps the previous value (or default
-    if never called).
+    Call once at startup.  Any parameter left as ``None`` keeps the
+    previous value (or default if never called).
 
     Parameters
     ----------
@@ -68,17 +67,18 @@ def configure(
     signature :
         A DSPy ``Signature`` subclass for memory extraction instead of the
         built-in ``ExtractMemory``.
-    reranker_lm :
-        ``dspy.LM`` identifying the reranker model (e.g. ``dspy.LM("openrouter/cohere/rerank-4-fast")``).
-        ``None`` disables reranking.
+    reranker_model :
+        Model string for the reranker, e.g. ``"cohere/rerank-english-v3.0"``
+        or ``"openrouter/cohere/rerank-4-fast"``.  Uses LiteLLM's
+        ``rerank()`` which supports the same ``provider/model`` format as
+        ``dspy.LM``.
 
     Returns
     -------
     The configured ``dspy.LM`` for extraction, or ``None`` if not provided.
     """
     global _lm, _embedding_lm, _embedding_dim
-    global _uri, _table_name
-    global _reranker_lm, _signature, _configured
+    global _uri, _table_name, _reranker_model, _signature, _configured
 
     if extraction_lm is not None:
         _lm = extraction_lm
@@ -97,8 +97,8 @@ def configure(
         _table_name = table_name
     if signature is not None:
         _signature = signature
-    if reranker_lm is not None:
-        _reranker_lm = reranker_lm
+    if reranker_model is not None:
+        _reranker_model = reranker_model
 
     _configured = True
     return _lm
@@ -129,8 +129,8 @@ def get_store_config() -> tuple[str, str]:
     return _uri, _table_name
 
 
-def get_reranker_lm_config() -> dspy.LM | None:
-    return _reranker_lm
+def get_reranker_model_config() -> str | None:
+    return _reranker_model
 
 
 def get_signature_config():
