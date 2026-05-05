@@ -186,7 +186,7 @@ def Store(
     if reranker is _UNSET:
         if reranker_lm is not None:
             reranker = OpenRouterReranker(
-                model=reranker_lm.model,
+                lm=reranker_lm,
                 column="content",
             )
         else:
