@@ -131,7 +131,7 @@ messages = [
 
 created = store.create_memories(
     user_id="user_123",
-    messages=messages,
+    contents=messages,
     extract=True,  # default; uses DSPy ChainOfThought to extract memories
 )
 # Returns multiple MemoryItems categorized automatically:

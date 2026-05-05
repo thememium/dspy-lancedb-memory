@@ -51,7 +51,7 @@ messages = [
 
 created = store.create_memories(
     user_id="user_123",
-    messages=messages,
+    contents=messages,
     extract=True,
 )
 
@@ -121,7 +121,7 @@ tech_messages = [
 
 code_memories = code_store.create_memories(
     user_id="dev_1",
-    messages=tech_messages,
+    contents=tech_messages,
     extract=True,
 )
 
