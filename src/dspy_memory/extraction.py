@@ -1,6 +1,5 @@
 import dspy
 
-from .config import configure_runtime
 from .models import MemoryItem, MemoryType, memory_type_from_string
 
 
@@ -30,11 +29,13 @@ class ExtractMemory(dspy.Signature):
 
 
 class MemoryExtractor(dspy.Module):
-    """Wraps ExtractMemory in ChainOfThought for reliable extraction."""
+    """Wraps ExtractMemory in ChainOfThought for reliable extraction.
+
+    Requires ``memory.configure()`` to have been called before first use.
+    """
 
     def __init__(self):
         super().__init__()
-        configure_runtime()
         self.extract = dspy.ChainOfThought(ExtractMemory)
 
     def forward(self, messages: list[dict[str, str]]) -> list[tuple[str, MemoryType]]:
