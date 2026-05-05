@@ -37,6 +37,7 @@
 
 DSPy Memory is a persistent vector memory store for DSPy-powered AI agents. It uses DSPy signatures to extract structured, categorized memories from conversation turns and stores them in LanceDB for efficient semantic retrieval.
 
+- **Method-based SDK** — Single ``memory.configure()`` entry point for extraction LM, embedding model, and reranker
 - **DSPy-native extraction** — Uses `ChainOfThought` with a typed `ExtractMemory` signature to pull salient information from conversations
 - **Structured memory taxonomy** — Six memory categories (preference, semantic, episodic, procedural, summary, artifact) for fine-grained organization
 - **Persistent vector storage** — LanceDB-backed with automatic text embeddings via the DSPy `Embedder`
@@ -81,13 +82,17 @@ pip install dspy-memory
 ### Basic Usage
 
 ```python
-from dspy_memory import LanceDSPyMemoryStore, configure_runtime
+from dspy_memory import memory
 
-# Configure DSPy runtime (required before any DSPy operations)
-configure_runtime(model="openrouter/openai/gpt-4o-mini")
+# Configure: extraction LM, embedding model, and optional reranker
+memory.configure(
+    model="openrouter/openai/gpt-4o-mini",
+    embedding_model="openrouter/openai/text-embedding-3-small",
+    reranker_model="cohere/rerank-4-fast",   # optional — omit to disable reranking
+)
 
-# Create a memory store (defaults to .lancedb/ on disk)
-store = LanceDSPyMemoryStore()
+# Create a store — picks up all defaults from configure()
+store = memory.Store()
 
 # Store a single memory
 store.create_memory(
@@ -96,10 +101,11 @@ store.create_memory(
     memory_type="preference",
 )
 
-# Search memories
+# Search memories (with reranking)
 results = store.search_memories(
     user_id="user_123",
     query="What does Edward prefer?",
+    use_reranker=True,
 )
 print(results)
 ```
@@ -109,9 +115,10 @@ print(results)
 The real power is automatic extraction. Pass a conversation turn and the LLM extracts all salient memories, each categorized by type.
 
 ```python
-from dspy_memory import LanceDSPyMemoryStore
+from dspy_memory import memory
 
-store = LanceDSPyMemoryStore()
+memory.configure(model="openrouter/openai/gpt-4o-mini")
+store = memory.Store()
 
 messages = [
     {
@@ -133,18 +140,20 @@ created = store.create_memories(
 #   procedural: "User is building a RAG pipeline"
 #   artifact: "github.com/example/climate-rag/pull/42"
 
-for memory in created:
-    print(f"[{memory['memory_type']}] {memory['content']}")
+for m in created:
+    print(f"[{m['memory_type']}] {m['content']}")
 ```
 
 ### Search with Memory Type and Reranking
 
 ```python
-from dspy_memory import LanceDSPyMemoryStore, OpenRouterReranker
+from dspy_memory import memory
 
-store = LanceDSPyMemoryStore(
-    reranker=OpenRouterReranker(column="content"),
+memory.configure(
+    model="openrouter/openai/gpt-4o-mini",
+    reranker_model="cohere/rerank-4-fast",
 )
+store = memory.Store()
 
 # Filter by memory type and optionally use reranking for better results
 results = store.search_memories(
@@ -184,6 +193,20 @@ store.delete_memory(memory_id="some-uuid")
 
 ### Using OpenRouter Reranker
 
+The easiest way — configure via ``memory.configure(reranker_model=...)`` and `memory.Store()` picks it up automatically:
+
+```python
+from dspy_memory import memory
+
+memory.configure(
+    model="openrouter/openai/gpt-4o-mini",
+    reranker_model="cohere/rerank-4-fast",
+)
+store = memory.Store()  # reranker auto-created from configure()
+```
+
+For full control (custom column, top_n, etc.), build an ``OpenRouterReranker`` and pass it to ``Store()``:
+
 ```python
 from dspy_memory import OpenRouterReranker
 
@@ -193,24 +216,36 @@ reranker = OpenRouterReranker(
     top_n=20,                       # optional: limit reranked candidates
 )
 
-store = LanceDSPyMemoryStore(reranker=reranker)
+store = memory.Store(reranker=reranker)
 ```
 
 Requires `OPENROUTER_API_KEY` environment variable or pass `api_key=...` to the constructor.
 
+> **Note:** `dspy.LM` does not have a built-in reranker interface — the ``OpenRouterReranker`` calls OpenRouter's ``/rerank`` endpoint directly via HTTP.
+
 ### Custom Configuration
 
+Everything — including LanceDB defaults — in one call:
+
 ```python
-from dspy_memory import LanceDSPyMemoryStore, configure_runtime
+from dspy_memory import memory
 
-configure_runtime(model="openrouter/anthropic/claude-sonnet-4-20250514")
-
-store = LanceDSPyMemoryStore(
-    uri=".my_memories",                              # LanceDB URI
-    table_name="user_memories",                      # Table name
-    embedding_model="openrouter/openai/text-embedding-3-small",  # DSPy Embedder model
-    embedding_dim=1536,                              # Must match the model's output dim
+memory.configure(
+    model="openrouter/anthropic/claude-sonnet-4-20250514",                  # extraction LM
+    embedding_model="openrouter/openai/text-embedding-3-small",              # embedding model
+    embedding_dim=1536,                                                      # must match
+    reranker_model="cohere/rerank-4-fast",                                    # reranker model
+    uri=".my_memories",                                                       # LanceDB path
+    table_name="user_memories",                                               # LanceDB table
 )
+
+store = memory.Store()  # everything inherited from configure()
+```
+
+Override individual fields on ``Store()`` when you need something different:
+
+```python
+store = memory.Store(uri="./scratch", reranker=None)
 ```
 
 <p align="right">(<a href="#readme-top">back to top</a>)</p>
@@ -235,11 +270,10 @@ When storing directly (without extraction), the default type is `semantic`.
 ## Available API
 
 | API | Description |
-|---|---|
-| [`LanceDSPyMemoryStore`](#basic-usage) | Main persistent vector memory store with full CRUD |
+|---|---|---|
+| [`memory`](#basic-usage) | SDK module — ``memory.configure()`` and ``memory.Store()`` |
 | [`MemoryExtractor`](#extract-memories-from-conversation) | DSPy `ChainOfThought` module for memory extraction |
 | [`OpenRouterReranker`](#using-openrouter-reranker) | LanceDB-compatible reranker via OpenRouter |
-| [`configure_runtime()`](#basic-usage) | One-shot DSPy LM configuration helper |
 | [`MemoryType`](#memory-taxonomy) | Enum of the six memory categories |
 | [`MemoryItem`](#extract-memories-from-conversation) | Pydantic model for extracted memories |
 
