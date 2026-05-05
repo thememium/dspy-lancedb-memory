@@ -9,7 +9,7 @@ import pyarrow as pa
 from lancedb.query import LanceVectorQueryBuilder
 from lancedb.rerankers import Reranker
 
-from .extraction import MemoryExtractor
+from .extraction import ExtractMemory, MemoryExtractor
 from .models import MemoryType, memory_type_from_string
 
 
@@ -20,6 +20,7 @@ class LanceDSPyMemoryStore:
         table_name: str = "memories",
         embedding_model: str = "openrouter/openai/text-embedding-3-small",
         embedding_dim: int = 1536,
+        signature=None,
         reranker: Reranker | None = None,
         rerank_limit_multiplier: int = 10,
     ):
@@ -33,6 +34,7 @@ class LanceDSPyMemoryStore:
             caching=True,
         )
         self.reranker = reranker
+        self._extraction_signature = signature or ExtractMemory
 
         self.table = self._get_or_create_table()
 
@@ -87,12 +89,17 @@ class LanceDSPyMemoryStore:
     ) -> dict[str, Any]:
         now = datetime.now(timezone.utc).isoformat()
         resolved_type = memory_type_from_string(memory_type)
+        type_value = (
+            resolved_type.value
+            if isinstance(resolved_type, MemoryType)
+            else resolved_type
+        )
 
         return {
             "id": str(uuid.uuid4()),
             "user_id": user_id,
             "conversation_id": conversation_id,
-            "memory_type": resolved_type.value,
+            "memory_type": type_value,
             "content": content,
             "metadata": json.dumps(metadata or {}),
             "created_at": now,
@@ -153,8 +160,8 @@ class LanceDSPyMemoryStore:
             if not messages:
                 raise ValueError("messages are required when extract=True")
 
-            extractor = MemoryExtractor()
-            extracted: list[tuple[str, MemoryType]] = extractor.forward(
+            extractor = MemoryExtractor(signature=self._extraction_signature)
+            extracted: list[tuple[str, MemoryType | str]] = extractor.forward(
                 messages=messages
             )
 
@@ -227,9 +234,11 @@ class LanceDSPyMemoryStore:
             filters.append(f"conversation_id = '{conversation_id}'")
 
         if memory_type:
-            filters.append(
-                f"memory_type = '{memory_type_from_string(memory_type).value}'"
+            resolved = memory_type_from_string(memory_type)
+            type_value = (
+                resolved.value if isinstance(resolved, MemoryType) else resolved
             )
+            filters.append(f"memory_type = '{type_value}'")
 
         builder = cast(
             LanceVectorQueryBuilder,
