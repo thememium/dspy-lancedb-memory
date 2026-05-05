@@ -41,7 +41,7 @@ DSPy Memory is a persistent vector memory store for DSPy-powered AI agents. It u
 - **DSPy-native extraction** — Uses `ChainOfThought` with a typed `ExtractMemory` signature to pull salient information from conversations
 - **Structured memory taxonomy** — Six memory categories (preference, semantic, episodic, procedural, summary, artifact) for fine-grained organization
 - **Persistent vector storage** — LanceDB-backed with automatic text embeddings via the DSPy `Embedder`
-- **Semantic search** — Query memories by user ID, conversation ID, memory type, or natural language
+- **Semantic search** — Query memories by user ID, session ID, conversation ID, memory type, or natural language
 - **Optional reranking** — Plug in the `OpenRouterReranker` for Cohere-compatible reranking over vector search results
 - **Full CRUD** — Create, search, update, and delete individual memories or batch-extract from conversations
 
@@ -102,9 +102,19 @@ store.create_memory(
     memory_type="preference",
 )
 
+# Store with session and conversation scoping
+store.create_memory(
+    user_id="user_123",
+    session_id="session_abc",
+    conversation_id="conv_456",
+    content="Remember this from our conversation about RAG pipelines.",
+    memory_type="episodic",
+)
+
 # Search memories (with reranking)
 results = store.search_memories(
     user_id="user_123",
+    session_id="session_abc",   # optional — narrow to a session
     query="What does Edward prefer?",
     use_reranker=True,
 )
@@ -168,6 +178,40 @@ results = store.search_memories(
 )
 ```
 
+### Filtering by Session and Conversation
+
+Every memory can be scoped to a ``session_id`` and ``conversation_id``. Both are optional and can be used independently or together.
+
+```python
+# Scope to a specific session
+session_memories = store.search_memories(
+    user_id="user_123",
+    session_id="session_abc",
+    query="What did we discuss last time?",
+)
+
+# Scope to a specific conversation
+conversation_memories = store.search_memories(
+    user_id="user_123",
+    conversation_id="conv_456",
+    query="RAG pipeline details",
+)
+
+# Combine session + conversation for maximum precision
+precise = store.search_memories(
+    user_id="user_123",
+    session_id="session_abc",
+    conversation_id="conv_456",
+    query="specific topic",
+)
+
+# Omit both to search across all sessions and conversations
+all_results = store.search_memories(
+    user_id="user_123",
+    query="anything",
+)
+```
+
 ### Raw Store (No Extraction)
 
 Store content verbatim without LLM extraction.
@@ -175,7 +219,7 @@ Store content verbatim without LLM extraction.
 ```python
 store.create_memories(
     user_id="user_123",
-    messages=[{"role": "user", "content": "A raw fact worth storing."}],
+    contents=[{"role": "user", "content": "A raw fact worth storing."}],
     extract=False,
     memory_type="semantic",
 )
@@ -281,6 +325,7 @@ When storing directly (without extraction), the default type is `semantic`.
 | [`OpenRouterReranker`](#using-openrouter-reranker) | LanceDB-compatible reranker via OpenRouter |
 | [`MemoryType`](#memory-taxonomy) | Enum of the six memory categories |
 | [`MemoryItem`](#extract-memories-from-conversation) | Pydantic model for extracted memories |
+| `session_id` / `conversation_id` | Optional scoping fields on ``create_memory``, ``create_memories``, and ``search_memories`` |
 
 <p align="right">(<a href="#readme-top">back to top</a>)</p>
 
