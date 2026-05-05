@@ -83,12 +83,13 @@ pip install dspy-memory
 
 ```python
 from dspy_memory import memory
+import dspy
 
-# Configure: extraction LM, embedding model, and optional reranker
+# Configure: extraction LM, embedding LM, and optional reranker LM
 memory.configure(
-    model="openrouter/openai/gpt-4o-mini",
-    embedding_model="openrouter/openai/text-embedding-3-small",
-    reranker_model="cohere/rerank-4-fast",   # optional — omit to disable reranking
+    lm=dspy.LM("openrouter/openai/gpt-4o-mini"),
+    embedding_lm=dspy.LM("openrouter/openai/text-embedding-3-small"),
+    reranker_lm=dspy.LM("openrouter/cohere/rerank-4-fast"),   # optional — omit to disable reranking
 )
 
 # Create a store — picks up all defaults from configure()
@@ -116,8 +117,9 @@ The real power is automatic extraction. Pass a conversation turn and the LLM ext
 
 ```python
 from dspy_memory import memory
+import dspy
 
-memory.configure(model="openrouter/openai/gpt-4o-mini")
+memory.configure(lm=dspy.LM("openrouter/openai/gpt-4o-mini"))
 store = memory.Store()
 
 messages = [
@@ -148,10 +150,11 @@ for m in created:
 
 ```python
 from dspy_memory import memory
+import dspy
 
 memory.configure(
-    model="openrouter/openai/gpt-4o-mini",
-    reranker_model="cohere/rerank-4-fast",
+    lm=dspy.LM("openrouter/openai/gpt-4o-mini"),
+    reranker_lm=dspy.LM("openrouter/cohere/rerank-4-fast"),
 )
 store = memory.Store()
 
@@ -193,14 +196,15 @@ store.delete_memory(memory_id="some-uuid")
 
 ### Using OpenRouter Reranker
 
-The easiest way — configure via ``memory.configure(reranker_model=...)`` and `memory.Store()` picks it up automatically:
+The easiest way — configure via ``memory.configure(reranker_lm=...)`` and `memory.Store()` picks it up automatically:
 
 ```python
 from dspy_memory import memory
+import dspy
 
 memory.configure(
-    model="openrouter/openai/gpt-4o-mini",
-    reranker_model="cohere/rerank-4-fast",
+    lm=dspy.LM("openrouter/openai/gpt-4o-mini"),
+    reranker_lm=dspy.LM("openrouter/cohere/rerank-4-fast"),
 )
 store = memory.Store()  # reranker auto-created from configure()
 ```
@@ -229,14 +233,15 @@ Everything — including LanceDB defaults — in one call:
 
 ```python
 from dspy_memory import memory
+import dspy
 
 memory.configure(
-    model="openrouter/anthropic/claude-sonnet-4-20250514",                  # extraction LM
-    embedding_model="openrouter/openai/text-embedding-3-small",              # embedding model
-    embedding_dim=1536,                                                      # must match
-    reranker_model="cohere/rerank-4-fast",                                    # reranker model
-    uri=".my_memories",                                                       # LanceDB path
-    table_name="user_memories",                                               # LanceDB table
+    lm=dspy.LM("openrouter/anthropic/claude-sonnet-4-20250514"),                  # extraction LM
+    embedding_lm=dspy.LM("openrouter/openai/text-embedding-3-small"),              # embedding LM
+    embedding_dim=1536,                                                             # must match
+    reranker_lm=dspy.LM("openrouter/cohere/rerank-4-fast"),                         # reranker LM
+    uri=".my_memories",                                                              # LanceDB path
+    table_name="user_memories",                                                      # LanceDB table
 )
 
 store = memory.Store()  # everything inherited from configure()
