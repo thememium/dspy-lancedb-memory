@@ -11,7 +11,7 @@ Usage
     memory.configure(
         extraction_lm=dspy.LM("openrouter/anthropic/claude-sonnet-4-20250514"),
         embedding_lm=dspy.LM("openrouter/openai/text-embedding-3-small"),
-        reranker_model="cohere/rerank-english-v3.0",
+        reranker_model=dspy.LM("openrouter/cohere/rerank-4-fast"),
     )
 
     # 2. Create a store
@@ -33,7 +33,7 @@ from dspy_memory.config import DEFAULT_EMBEDDING_MODEL
 from dspy_memory.config import configure as _configure
 from dspy_memory.config import (
     get_embedding_config,
-    get_reranker_model_config,
+    get_reranker_lm_config,
     get_signature_config,
     get_store_config,
 )
@@ -61,7 +61,7 @@ def configure(
     uri: str | None = None,
     table_name: str | None = None,
     signature=None,
-    reranker_model: str | None = None,
+    reranker_lm: dspy.LM | str | None = None,
 ):
     """Configure DSPy Memory globally.
 
@@ -84,10 +84,9 @@ def configure(
         LanceDB table name.  Fallback for ``Store()``.
     signature :
         A DSPy ``Signature`` subclass for memory extraction.
-    reranker_model :
-        Model string for the reranker (e.g. ``"cohere/rerank-english-v3.0"``).
-        Uses ``litellm.rerank()`` internally — supports the same
-        ``provider/model`` format as ``dspy.LM``.
+    reranker_lm :
+        A ``dspy.LM`` or model string for the reranker
+        (e.g. ``dspy.LM("openrouter/cohere/rerank-4-fast")``).
 
     Example
     -------
@@ -98,7 +97,7 @@ def configure(
         memory.configure(
             extraction_lm=dspy.LM("openrouter/anthropic/claude-sonnet-4-20250514"),
             embedding_lm=dspy.LM("openrouter/openai/text-embedding-3-small"),
-            reranker_model="cohere/rerank-english-v3.0",
+            reranker_lm=dspy.LM("openrouter/cohere/rerank-4-fast"),
             uri=".my_memories",
             table_name="user_data",
         )
@@ -111,7 +110,7 @@ def configure(
         uri=uri,
         table_name=table_name,
         signature=signature,
-        reranker_model=reranker_model,
+        reranker_lm=reranker_lm,
     )
 
 
@@ -126,7 +125,7 @@ def Store(
     embedding_lm=None,
     embedding_dim: int | None = None,
     signature=None,
-    reranker_model: str | None = None,
+    reranker_lm: dspy.LM | str | None = None,
     reranker: Reranker | None | Any = _UNSET,
     rerank_limit_multiplier: int = 10,
 ) -> LanceDSPyMemoryStore:
@@ -146,14 +145,14 @@ def Store(
     signature :
         Custom DSPy ``Signature`` for extraction.  Falls back to
         :func:`configure`, then the built-in ``ExtractMemory``.
-    reranker_model :
-        Model string for ``LiteLLMReranker``.  Falls back to
-        :func:`configure`.  Ignored if *reranker* is passed.
+    reranker_lm :
+        A ``dspy.LM`` or model string for ``LiteLLMReranker``.  Falls back
+        to :func:`configure`.  Ignored if *reranker* is passed.
     reranker :
         A LanceDB ``Reranker`` instance.  Takes precedence over
-        *reranker_model*.
+        *reranker_lm*.
 
-        * **Not passed** — creates a ``LiteLLMReranker`` from *reranker_model*.
+        * **Not passed** — creates a ``LiteLLMReranker`` from *reranker_lm*.
         * ``None`` — explicitly disable reranking.
         * ``Reranker`` instance — use as-is.
     rerank_limit_multiplier :
@@ -181,13 +180,16 @@ def Store(
     if signature is None:
         signature = get_signature_config()
 
-    if reranker_model is None:
-        reranker_model = get_reranker_model_config()
+    if reranker_lm is None:
+        reranker_lm = get_reranker_lm_config()
 
     if reranker is _UNSET:
-        if reranker_model is not None:
+        if reranker_lm is not None:
+            model_str = (
+                reranker_lm.model if isinstance(reranker_lm, dspy.LM) else reranker_lm
+            )
             reranker = LiteLLMReranker(
-                model=reranker_model,
+                model=model_str,
                 column="content",
             )
         else:
