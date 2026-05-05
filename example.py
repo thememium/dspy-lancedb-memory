@@ -129,7 +129,44 @@ for m in code_memories:
     print(f"  [{m['memory_type']}] {m['content']}")
 
 # ===========================================================================
-# 5. Per-store overrides
+# 5. Filtering by user_id, session_id, and conversation_id
+# ===========================================================================
+
+# All three ID fields can be used alone or in combination
+store.create_memory(
+    user_id="user_123",
+    session_id="session_abc",
+    content="Session-specific memory.",
+    memory_type="episodic",
+)
+
+# Scope search to a specific session
+session_results = store.search_memories(
+    user_id="user_123",
+    session_id="session_abc",
+    query="Session-specific",
+)
+print(f"Session-filtered: {len(session_results)} result(s)")
+
+# Combine session_id with conversation_id
+store.create_memory(
+    user_id="user_123",
+    session_id="session_abc",
+    conversation_id="conv_456",
+    content="Deeply scoped memory.",
+    memory_type="semantic",
+)
+
+combined = store.search_memories(
+    user_id="user_123",
+    session_id="session_abc",
+    conversation_id="conv_456",
+    query="scoped",
+)
+print(f"Combined filter: {len(combined)} result(s)")
+
+# ===========================================================================
+# 6. Per-store overrides
 # ===========================================================================
 
 # Override individual fields without affecting other stores:
