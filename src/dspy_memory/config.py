@@ -2,7 +2,6 @@
 
 from __future__ import annotations
 
-
 import dspy
 
 # ---------------------------------------------------------------------------
@@ -28,6 +27,8 @@ _uri: str = DEFAULT_URI
 _table_name: str = DEFAULT_TABLE_NAME
 _reranker_model: str | None = DEFAULT_RERANKER_MODEL
 _reranker_api_key: str | None = None
+# Custom extraction signature class.  None → use built-in ExtractMemory.
+_signature = None
 
 # Whether configure() has been explicitly called at least once.
 _configured: bool = False
@@ -46,6 +47,7 @@ def configure(
     embedding_dim: int | None = None,
     uri: str | None = None,
     table_name: str | None = None,
+    signature=None,
     reranker_model: str | None = None,
     reranker_api_key: str | None = None,
 ) -> dspy.LM | None:
@@ -72,6 +74,11 @@ def configure(
         LanceDB URI (directory path).  Used as default by ``memory.Store()``.
     table_name :
         LanceDB table name.  Used as default by ``memory.Store()``.
+    signature :
+        A DSPy ``Signature`` subclass to use for memory extraction instead of
+        the built-in ``ExtractMemory``.  The signature must have an output
+        field ``memories: list[M]`` where ``M`` has ``.content`` and ``.type``
+        string attributes.
     reranker_model :
         Reranker model identifier, e.g. ``"cohere/rerank-4-fast"``.
         Pass ``None`` to disable reranking.
@@ -86,7 +93,7 @@ def configure(
     """
     global _lm, _embedding_model, _embedding_dim
     global _uri, _table_name
-    global _reranker_model, _reranker_api_key, _configured
+    global _reranker_model, _reranker_api_key, _signature, _configured
 
     if lm is not None:
         _lm = lm
@@ -103,6 +110,8 @@ def configure(
         _uri = uri
     if table_name is not None:
         _table_name = table_name
+    if signature is not None:
+        _signature = signature
     if reranker_model is not None:
         _reranker_model = reranker_model
     if reranker_api_key is not None:
@@ -144,3 +153,8 @@ def get_store_config() -> tuple[str, str]:
 def get_reranker_config() -> tuple[str | None, str | None]:
     """Return ``(reranker_model, reranker_api_key)`` — both may be ``None``."""
     return _reranker_model, _reranker_api_key
+
+
+def get_signature_config():
+    """Return the configured signature class, or ``None`` (use built-in)."""
+    return _signature
