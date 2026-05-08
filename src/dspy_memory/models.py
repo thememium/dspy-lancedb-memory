@@ -81,6 +81,9 @@ class Memory(BaseModel):
     content: str
     """The memory text."""
 
+    relevance_score: float | None = None
+    """Relevance score from search (cosine similarity or reranker score, 0–1). ``None`` when the memory was not retrieved via search."""
+
     metadata: dict[str, Any]
     """Arbitrary structured data attached at write time."""
 

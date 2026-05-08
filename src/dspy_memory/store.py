@@ -251,10 +251,22 @@ class LanceDSPyMemoryStore:
         """Convert a raw LanceDB row dict to a ``Memory`` instance."""
         clean = dict(row)
         clean.pop("vector", None)
-        clean.pop("_distance", None)
+
+        # Preserve relevance score: reranker sets _relevance_score directly;
+        # otherwise derive cosine similarity from LanceDB's _distance.
+        relevance_score = None
+        if "_relevance_score" in clean:
+            relevance_score = float(clean.pop("_relevance_score"))
+        elif "_distance" in clean:
+            distance = float(clean.pop("_distance"))
+            relevance_score = 1.0 - distance
+
         if isinstance(clean.get("metadata"), str):
             clean["metadata"] = json.loads(clean["metadata"])
-        return Memory.model_validate(clean)
+
+        memory = Memory.model_validate(clean)
+        memory.relevance_score = relevance_score
+        return memory
 
     @staticmethod
     def _without_vectors(rows: list[Any]) -> Memories:
