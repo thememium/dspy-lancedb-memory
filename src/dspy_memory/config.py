@@ -13,6 +13,7 @@ DEFAULT_EMBEDDING_MODEL = "openrouter/openai/text-embedding-3-small"
 DEFAULT_EMBEDDING_DIM = 1536
 DEFAULT_URI = ".lancedb"
 DEFAULT_TABLE_NAME = "memories"
+DEFAULT_NAMESPACE: list[str] = []
 
 # ---------------------------------------------------------------------------
 # Module-level state
@@ -23,6 +24,7 @@ _embedding_lm: dspy.LM | None = None
 _embedding_dim: int = DEFAULT_EMBEDDING_DIM
 _uri: str = DEFAULT_URI
 _table_name: str = DEFAULT_TABLE_NAME
+_namespace: list[str] = DEFAULT_NAMESPACE.copy()
 _reranker_lm: dspy.LM | str | None = None
 _signature = None
 
@@ -42,6 +44,7 @@ def configure(
     embedding_dim: int | None = None,
     uri: str | None = None,
     table_name: str | None = None,
+    namespace: list[str] | None = None,
     signature=None,
     reranker_lm: dspy.LM | str | None = None,
 ) -> dspy.LM | None:
@@ -64,6 +67,11 @@ def configure(
         LanceDB URI (directory path).  Default for ``memory.Store()``.
     table_name :
         LanceDB table name.  Default for ``memory.Store()``.
+    namespace :
+        LanceDB namespace path as a list of components, e.g.
+        ``["prod", "search"]``.  The empty list ``[]`` means root
+        namespace.  Namespace components must contain only letters,
+        numbers, underscores, hyphens, and periods.
     signature :
         A DSPy ``Signature`` subclass for memory extraction instead of the
         built-in ``ExtractMemory``.
@@ -77,7 +85,7 @@ def configure(
     The configured ``dspy.LM`` for extraction, or ``None`` if not provided.
     """
     global _lm, _embedding_lm, _embedding_dim
-    global _uri, _table_name, _reranker_lm, _signature, _configured
+    global _uri, _table_name, _namespace, _reranker_lm, _signature, _configured
 
     if extraction_lm is not None:
         _lm = extraction_lm
@@ -94,6 +102,8 @@ def configure(
         _uri = uri
     if table_name is not None:
         _table_name = table_name
+    if namespace is not None:
+        _namespace = list(namespace)
     if signature is not None:
         _signature = signature
     if reranker_lm is not None:
@@ -124,8 +134,12 @@ def get_embedding_config() -> tuple[dspy.LM | None, int]:
     return _embedding_lm, _embedding_dim
 
 
-def get_store_config() -> tuple[str, str]:
-    return _uri, _table_name
+def get_store_config() -> tuple[str, str, list[str]]:
+    return _uri, _table_name, list(_namespace)
+
+
+def get_namespace_config() -> list[str]:
+    return list(_namespace)
 
 
 def get_reranker_lm_config() -> dspy.LM | str | None:
