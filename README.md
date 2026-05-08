@@ -238,6 +238,84 @@ store.update_memory(
 store.delete_memory(memory_id="some-uuid")
 ```
 
+### Upsert — Insert, Update, or Skip
+
+``upsert_memory`` uses semantic similarity to decide what to do:
+
+1. **Exact match** — same ``content`` string exists → skip (no-op)
+2. **Semantic match** — similar content found (cosine similarity ≥ threshold) → **update** it
+3. **No match** — nothing close enough → **insert** a new memory
+
+```python
+# First insert
+store.upsert_memory(
+    user_id="user_123",
+    content="Edward is building a RAG pipeline for climate modeling.",
+    memory_type="semantic",
+)
+
+# Same content string → skip (returns existing row unchanged)
+store.upsert_memory(
+    user_id="user_123",
+    content="Edward is building a RAG pipeline for climate modeling.",
+)
+
+# Semantically similar content → update that memory in place
+store.upsert_memory(
+    user_id="user_123",
+    content="Edward is designing a RAG pipeline for climate data analysis.",
+    similarity_threshold=0.8,  # lower = more aggressive updates
+)
+
+# Completely different content → insert a new row
+store.upsert_memory(
+    user_id="user_123",
+    content="Edward prefers DSPy signatures over raw prompts.",
+    memory_type="preference",
+)
+```
+
+The ``similarity_threshold`` (default ``0.85``) controls how close two
+memories must be to consider them the same.  Higher values make upsert
+more conservative (mostly inserts); lower values make it more aggressive
+(mostly updates).
+
+### Batch Upsert with Extraction
+
+``upsert_memories`` mirrors ``create_memories`` exactly — same parameters,
+same DSPy extraction — but each extracted memory goes through the upsert
+decision instead of a blind insert.
+
+```python
+from dspy_memory import memory
+import dspy
+
+memory.configure(extraction_lm=dspy.LM("openrouter/openai/gpt-4o-mini"))
+store = memory.Store()
+
+messages = [
+    {
+        "role": "user",
+        "content": "I really like using DSPy signatures instead of writing prompts by hand. "
+                   "I'm working on a RAG pipeline for my thesis on climate modeling. "
+                   "The PR is at github.com/example/climate-rag/pull/42.",
+    },
+]
+
+upserted = store.upsert_memories(
+    user_id="user_123",
+    contents=messages,
+    extract=True,
+)
+
+for m in upserted:
+    # Each extracted memory was independently upserted:
+    #   - exact match → skip
+    #   - semantic match → update
+    #   - no match → insert
+    print(f"[{m['memory_type']}] {m['content']}")
+```
+
 ### Using the Reranker
 
 The easiest way — configure via ``memory.configure(reranker_lm=...)`` with a ``dspy.LM`` and `memory.Store()` picks it up automatically:
@@ -345,7 +423,8 @@ When storing directly (without extraction), the default type is `semantic`.
 | [`LiteLLMReranker`](#using-the-reranker) | Cross-encoder reranker via ``litellm.rerank()`` — supports Cohere, Jina, OpenRouter, and more |
 | [`MemoryType`](#memory-taxonomy) | Enum of the six memory categories |
 | [`MemoryItem`](#extract-memories-from-conversation) | Pydantic model for extracted memories |
-| `session_id` / `conversation_id` | Optional scoping fields on ``create_memory``, ``create_memories``, and ``search_memories`` |
+| [`upsert_memory`](#upsert--insert-update-or-skip) | Semantic upsert — insert, update, or skip based on content similarity |
+| `session_id` / `conversation_id` | Optional scoping fields on ``create_memory``, ``create_memories``, ``search_memories``, and ``upsert_memory`` |
 
 <p align="right">(<a href="#readme-top">back to top</a>)</p>
 

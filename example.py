@@ -56,7 +56,7 @@ created = store.create_memories(
 )
 
 for m in created:
-    print(f"  [{m['memory_type']}] {m['content']}")
+    print(f"  [{m.memory_type}] {m.content}")
 
 # ===========================================================================
 # 3. Custom memory types
@@ -126,7 +126,7 @@ code_memories = code_store.create_memories(
 )
 
 for m in code_memories:
-    print(f"  [{m['memory_type']}] {m['content']}")
+    print(f"  [{m.memory_type}] {m.content}")
 
 # ===========================================================================
 # 5. Filtering by user_id, session_id, and conversation_id
@@ -186,6 +186,71 @@ mem = store.create_memory(
     content="Old text",
     memory_type="semantic",
 )
-store.update_memory(memory_id=mem["id"], content="Updated text")
-store.delete_memory(memory_id=mem["id"])
+store.update_memory(memory_id=mem.id, content="Updated text")
+store.delete_memory(memory_id=mem.id)
 print("Update and delete: OK")
+
+# ===========================================================================
+# 7. Upsert — insert, update, or skip based on semantic similarity
+# ===========================================================================
+
+# First insert
+first = store.upsert_memory(
+    user_id="user_123",
+    content="Edward is building a RAG pipeline for climate modeling.",
+    memory_type="semantic",
+)
+print(f"Created: {first.id[:8]}… — {first.content}")
+
+# Same content → skip (no-op, returns same row)
+skip = store.upsert_memory(
+    user_id="user_123",
+    content="Edward is building a RAG pipeline for climate modeling.",
+    memory_type="semantic",
+)
+print(f"Skipped (same id? {skip.id == first.id}): {skip.content}")
+
+# Semantically similar content → update
+updated = store.upsert_memory(
+    user_id="user_123",
+    content="Edward is designing a RAG pipeline for climate data analysis.",
+    memory_type="semantic",
+    similarity_threshold=0.8,
+)
+print(f"Updated (same id? {updated.id == first.id}): {updated.content}")
+
+# Completely different content → insert
+new = store.upsert_memory(
+    user_id="user_123",
+    content="Edward prefers DSPy signatures over raw prompts.",
+    memory_type="preference",
+)
+print(f"New: {new.id[:8]}… — [{new.memory_type}] {new.content}")
+
+# ===========================================================================
+# 8. Upsert memories — batch upsert with extraction
+# ===========================================================================
+
+# Exactly the same as store.create_memories(...), but each extracted
+# memory goes through the upsert decision instead of a blind insert.
+upserted = store.upsert_memories(
+    user_id="user_123",
+    contents=[
+        {
+            "role": "user",
+            "content": (
+                "I really like using DSPy signatures instead of writing prompts by hand. "
+                "I'm working on a RAG pipeline for my thesis on climate modeling. "
+                "The PR is at github.com/example/climate-rag/pull/42."
+            ),
+        },
+    ],
+    extract=True,
+)
+
+for m in upserted:
+    # Each extracted memory was independently upserted:
+    #   - exact match → skip
+    #   - semantic match → update
+    #   - no match → insert
+    print(f"  [{m.memory_type}] {m.content}")

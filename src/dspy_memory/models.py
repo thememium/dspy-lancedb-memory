@@ -1,4 +1,7 @@
+from __future__ import annotations
+
 from enum import Enum
+from typing import Any
 
 from pydantic import BaseModel
 
@@ -45,6 +48,59 @@ class MemoryItem(BaseModel):
 
     Must be one of: preference, semantic, episodic, procedural, summary, artifact.
     """
+
+
+class Memory(BaseModel):
+    """A stored memory record as returned by the store.
+
+    Use this in DSPy signatures via the ``Memories`` type alias::
+
+        from dspy_memory import Memories
+
+        class MySignature(dspy.Signature):
+            memories: Memories = dspy.InputField(
+                description="Relevant memories from the store"
+            )
+    """
+
+    id: str
+    """Unique identifier for the memory row."""
+
+    user_id: str
+    """The user this memory belongs to."""
+
+    session_id: str
+    """Session or thread identifier (may be empty)."""
+
+    conversation_id: str
+    """Conversation identifier (may be empty)."""
+
+    memory_type: str
+    """Category string — e.g. ``"preference"``, ``"semantic"``, or a custom type."""
+
+    content: str
+    """The memory text."""
+
+    metadata: dict[str, Any]
+    """Arbitrary structured data attached at write time."""
+
+    created_at: str
+    """ISO-8601 timestamp of creation."""
+
+    updated_at: str
+    """ISO-8601 timestamp of last update."""
+
+
+Memories = list[Memory]
+"""Type alias for ``list[Memory]``.
+
+Use in DSPy signatures::
+
+    class MySignature(dspy.Signature):
+        memories: Memories = dspy.InputField(
+            description="Relevant memories from the store"
+        )
+"""
 
 
 def memory_type_from_string(value: MemoryType | str | None) -> MemoryType | str:

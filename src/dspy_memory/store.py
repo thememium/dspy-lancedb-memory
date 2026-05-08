@@ -10,7 +10,7 @@ from lancedb.query import LanceVectorQueryBuilder
 from lancedb.rerankers import Reranker
 
 from .extraction import ExtractMemory, MemoryExtractor
-from .models import MemoryType, memory_type_from_string
+from .models import Memories, Memory, MemoryType, memory_type_from_string
 
 
 class LanceDSPyMemoryStore:
@@ -118,15 +118,24 @@ class LanceDSPyMemoryStore:
         }
 
     @staticmethod
-    def _without_vectors(rows: list[dict[str, Any]]) -> list[dict[str, Any]]:
-        sanitized: list[dict[str, Any]] = []
-        for row in rows:
-            clean_row = dict(row)
-            clean_row.pop("vector", None)
-            if isinstance(clean_row.get("metadata"), str):
-                clean_row["metadata"] = json.loads(clean_row["metadata"])
-            sanitized.append(clean_row)
-        return sanitized
+    def _to_memory(row: dict[str, Any]) -> Memory:
+        """Convert a raw LanceDB row dict to a ``Memory`` instance."""
+        clean = dict(row)
+        clean.pop("vector", None)
+        clean.pop("_distance", None)
+        if isinstance(clean.get("metadata"), str):
+            clean["metadata"] = json.loads(clean["metadata"])
+        return Memory.model_validate(clean)
+
+    @staticmethod
+    def _without_vectors(rows: list[Any]) -> Memories:
+        result: list[Memory] = []
+        for r in rows:
+            if isinstance(r, Memory):
+                result.append(r)
+            else:
+                result.append(LanceDSPyMemoryStore._to_memory(r))
+        return result
 
     def create_memories(
         self,
@@ -138,7 +147,7 @@ class LanceDSPyMemoryStore:
         extract: bool = True,
         memory_type: MemoryType | str | None = None,
         metadata: dict[str, Any] | None = None,
-    ) -> list[dict[str, Any]]:
+    ) -> Memories:
         """
         Store content for a user — either raw or extracted from conversation.
 
@@ -166,7 +175,7 @@ class LanceDSPyMemoryStore:
 
         Returns
         -------
-        list[dict[str, Any]]
+        Memories
             The full rows that were written to LanceDB.
         """
         if extract:
@@ -223,7 +232,7 @@ class LanceDSPyMemoryStore:
         conversation_id: str = "",
         memory_type: MemoryType | str = MemoryType.SEMANTIC,
         metadata: dict[str, Any] | None = None,
-    ) -> dict[str, Any]:
+    ) -> Memory:
         row = self._build_memory_row(
             user_id=user_id,
             content=content,
@@ -233,7 +242,7 @@ class LanceDSPyMemoryStore:
             metadata=metadata,
         )
         self.table.add([row])
-        return row
+        return self._to_memory(row)
 
     def search_memories(
         self,
@@ -245,7 +254,7 @@ class LanceDSPyMemoryStore:
         memory_type: MemoryType | str | None = None,
         limit: int = 5,
         use_reranker: bool = False,
-    ) -> list[dict[str, Any]]:
+    ) -> Memories:
         filters = [f"user_id = '{user_id}'"]
 
         if session_id:
@@ -287,6 +296,197 @@ class LanceDSPyMemoryStore:
         row["vector"] = self._embed(content)
         self.table.delete(f"id = '{memory_id}'")
         self.table.add([row])
+
+    def upsert_memories(
+        self,
+        *,
+        user_id: str,
+        contents: list[dict[str, str]] | None = None,
+        session_id: str = "",
+        conversation_id: str = "",
+        extract: bool = True,
+        memory_type: MemoryType | str | None = None,
+        metadata: dict[str, Any] | None = None,
+        similarity_threshold: float = 0.85,
+    ) -> Memories:
+        """Batch upsert — insert, update, or skip memories based on semantic
+        similarity.  Mirrors :meth:`create_memories` but uses
+        :meth:`upsert_memory` under the hood.
+
+        When *extract* is ``True`` (default), a DSPy Signature extracts
+        salient memories from the conversation turn and each extracted
+        memory is independently upserted.
+
+        When *extract* is ``False``, *contents* must contain exactly one
+        item which is upserted verbatim.
+
+        Parameters
+        ----------
+        user_id : str
+            User these memories belong to.
+        contents : list[dict[str, str]] | None
+            A conversation turn in ``{"role": ..., "content": ...}`` format.
+            Required when *extract* is ``True``.
+        session_id : str
+            Optional session scope for matching.
+        conversation_id : str
+            Optional conversation scope for matching.
+        extract : bool
+            When ``True``, use DSPy extraction to pull out individual
+            memories from the conversation text.
+        memory_type : MemoryType | str | None
+            Force a specific category.  ``None`` lets the LLM choose when
+            extracting; falls back to ``MemoryType.SEMANTIC`` otherwise.
+        metadata : dict[str, Any] | None
+            Structured data attached to new rows (ignored on update).
+        similarity_threshold : float
+            Cosine similarity threshold forwarded to :meth:`upsert_memory`.
+            Default ``0.85``.
+
+        Returns
+        -------
+        Memories
+            The resulting rows.
+        """
+        if extract:
+            if not contents:
+                raise ValueError("contents is required when extract=True")
+
+            extractor = MemoryExtractor(signature=self._extraction_signature)
+            extracted: list[tuple[str, MemoryType | str]] = extractor.forward(
+                messages=contents
+            )
+
+            stored = [
+                self.upsert_memory(
+                    user_id=user_id,
+                    session_id=session_id,
+                    conversation_id=conversation_id,
+                    content=content,
+                    memory_type=(
+                        memory_type_from_string(memory_type)
+                        if memory_type is not None
+                        else inferred_type
+                    ),
+                    metadata=metadata,
+                    similarity_threshold=similarity_threshold,
+                )
+                for content, inferred_type in extracted
+            ]
+            return stored  # upsert_memory already strips vectors
+
+        if not contents or len(contents) != 1:
+            raise ValueError(
+                "verbatim (extract=False) requires exactly one item in contents"
+            )
+
+        row = self.upsert_memory(
+            user_id=user_id,
+            session_id=session_id,
+            conversation_id=conversation_id,
+            content=contents[0]["content"],
+            memory_type=(
+                memory_type_from_string(memory_type)
+                if memory_type is not None
+                else MemoryType.SEMANTIC
+            ),
+            metadata=metadata,
+            similarity_threshold=similarity_threshold,
+        )
+        return [row]
+
+    def upsert_memory(
+        self,
+        *,
+        user_id: str,
+        content: str,
+        session_id: str = "",
+        conversation_id: str = "",
+        memory_type: MemoryType | str = MemoryType.SEMANTIC,
+        metadata: dict[str, Any] | None = None,
+        similarity_threshold: float = 0.85,
+    ) -> Memory:
+        """Insert or update a memory based on semantic similarity.
+
+        Three-way decision:
+
+        1. **Exact match** — If a memory with the same *content* string
+           already exists for this user, skip the write and return the
+           existing row unchanged (no-op).
+        2. **Semantic match** — If no exact match but the top vector search
+           result has cosine similarity ≥ *similarity_threshold*, treat it
+           as the same memory being updated: replace its content (and
+           re-embed).
+        3. **No match** — No existing memory is close enough; insert a new
+           row.
+
+        Parameters
+        ----------
+        user_id : str
+            User the memory belongs to.
+        content : str
+            New (or updated) memory text.
+        session_id : str
+            Optional session scope for the match.
+        conversation_id : str
+            Optional conversation scope for the match.
+        memory_type : MemoryType | str
+            Category for the memory.  Only used when creating new rows.
+        metadata : dict[str, Any] | None
+            Bag of structured data.  Only used when creating new rows.
+        similarity_threshold : float
+            Minimum cosine similarity (0‑1) to consider two memories
+            semantically equivalent.  Default ``0.85``.
+
+        Returns
+        -------
+        Memory
+            The resulting memory row.
+        """
+        query_vec = self._embed(content)
+
+        # Build filters for the scope we care about.
+        filters = [f"user_id = '{user_id}'"]
+        if session_id:
+            filters.append(f"session_id = '{session_id}'")
+        if conversation_id:
+            filters.append(f"conversation_id = '{conversation_id}'")
+
+        # Search for the closest existing memory in that scope.
+        results = (
+            self.table.search(query_vec).where(" AND ".join(filters)).limit(1).to_list()
+        )
+
+        if results:
+            existing = dict(results[0])
+            distance = existing.get("_distance", 1.0)
+            cosine_sim = 1.0 - distance
+
+            # --- Exact match → skip ---
+            if existing["content"] == content:
+                return self._without_vectors([existing])[0]
+
+            # --- Semantic match → update ---
+            if cosine_sim >= similarity_threshold:
+                self.update_memory(memory_id=existing["id"], content=content)
+                updated = (
+                    self.table.search().where(f"id = '{existing['id']}'").to_list()
+                )
+                return self._without_vectors([dict(updated[0])])[0]
+
+        # --- No match → create ---
+        return self._without_vectors(
+            [
+                self.create_memory(
+                    user_id=user_id,
+                    content=content,
+                    session_id=session_id,
+                    conversation_id=conversation_id,
+                    memory_type=memory_type,
+                    metadata=metadata,
+                )
+            ]
+        )[0]
 
     def delete_memory(self, *, memory_id: str) -> None:
         self.table.delete(f"id = '{memory_id}'")

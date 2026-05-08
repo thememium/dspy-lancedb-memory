@@ -56,7 +56,8 @@ class LiteLLMReranker(Reranker):
                 )
         except Exception as exc:
             logger.warning(
-                "Reranker call failed (%s); returning original results.", exc,
+                "Reranker call failed (%s); returning original results.",
+                exc,
             )
             return self._attach_fallback_scores(result_set)
 
@@ -64,7 +65,8 @@ class LiteLLMReranker(Reranker):
         indices, scores = zip(*[(r["index"], r["relevance_score"]) for r in results])
         result_set = result_set.take(list(indices))
         result_set = result_set.append_column(
-            "_relevance_score", pa.array(scores, type=pa.float32()),
+            "_relevance_score",
+            pa.array(scores, type=pa.float32()),
         )
         return result_set
 
@@ -77,7 +79,7 @@ class LiteLLMReranker(Reranker):
             )
         # OpenRouter expects the bare model name without the provider prefix.
         payload: dict[str, Any] = {
-            "model": self.model[len("openrouter/"):],
+            "model": self.model[len("openrouter/") :],
             "query": query,
             "documents": docs,
         }
@@ -104,7 +106,8 @@ class LiteLLMReranker(Reranker):
         else:
             scores = [0.0] * len(result_set)
         return result_set.append_column(
-            "_relevance_score", pa.array(scores, type=pa.float32()),
+            "_relevance_score",
+            pa.array(scores, type=pa.float32()),
         )
 
     # ------------------------------------------------------------------
