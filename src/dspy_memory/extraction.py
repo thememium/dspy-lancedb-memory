@@ -1,6 +1,6 @@
 import dspy
 
-from .models import MemoryItem, MemoryType, memory_type_from_string
+from .models import MemoryItem, MemoryType, ReconciledMemory, memory_type_from_string
 
 
 class ExtractMemory(dspy.Signature):
@@ -59,3 +59,112 @@ class MemoryExtractor(dspy.Module):
             cleaned.append((content, memory_type_from_string(item.type)))
 
         return cleaned
+
+
+class ReconcileMemory(dspy.Signature):
+    """
+    Compare a newly-extracted memory with existing stored memories and
+    decide the right action:
+
+    1. **keep** — the new memory is a duplicate or subset of existing
+       information. No change needed.
+    2. **update** — the new memory adds, refines, or corrects an existing
+       memory. Synthesize a unified version that preserves the best of both.
+    3. **create** — the new memory is genuinely distinct and should become a
+       new stored row.
+
+    Instructions
+    ------------
+    - If the existing memory covers the same subject/topic and the new memory
+      adds details (e.g., first name → full name, general food → specific
+      food), produce an **update** with a synthesized combined version.
+    - If the new memory is just a restatement or paraphrase with no new info,
+      produce **keep**.
+    - Only produce **create** when the new memory is clearly about a different
+      subject or fact.
+    - Always return ``final_content`` as a single concise sentence.
+    - For **keep** and **update**, always include the correct ``memory_id``.
+    """
+
+    new_memory_content: str = dspy.InputField(desc="The newly extracted memory text.")
+    new_memory_type: str = dspy.InputField(
+        desc="The type/category of the new memory (e.g., semantic, preference)."
+    )
+    existing_memories: list[dict] = dspy.InputField(
+        desc="List of existing memories that are semantically similar. Each dict "
+        "has 'id' (str), 'content' (str), and 'type' (str)."
+    )
+    reconciled: ReconciledMemory = dspy.OutputField(
+        desc="The decision: action, memory_id, final_content, final_type."
+    )
+
+
+class MemoryReconciler(dspy.Module):
+    """Wraps a DSPy Signature in ChainOfThought for reliable memory
+    reconciliation.
+
+    Parameters
+    ----------
+    signature :
+        A DSPy ``Signature`` class for memory reconciliation.
+        Defaults to :class:`ReconcileMemory`.
+    """
+
+    def __init__(self, signature=ReconcileMemory):
+        super().__init__()
+        self.reconcile = dspy.ChainOfThought(signature)
+
+    def forward(
+        self,
+        *,
+        new_memory_content: str,
+        new_memory_type: str,
+        existing_memories: list[dict],
+    ) -> ReconciledMemory:
+        prediction: dspy.Prediction = self.reconcile(
+            new_memory_content=new_memory_content,
+            new_memory_type=new_memory_type,
+            existing_memories=existing_memories,
+        )
+        reconciled: ReconciledMemory = prediction.reconciled
+
+        # Normalize and guard the action field
+        action = reconciled.action.strip().lower()
+        if action.startswith("keep"):
+            action = "keep"
+        elif action.startswith("update"):
+            action = "update"
+        elif action.startswith("create"):
+            action = "create"
+        else:
+            # Fallback — if the LLM is uncertain, default to create so we
+            # never silently discard novel information.
+            action = "create"
+
+        reconciled.action = action
+
+        # Ensure memory_id is set for keep / update actions
+        if action in ("keep", "update") and not reconciled.memory_id:
+            if existing_memories:
+                reconciled.memory_id = str(existing_memories[0]["id"])
+
+        # Ensure final_content is set
+        if not reconciled.final_content:
+            if action == "create":
+                reconciled.final_content = new_memory_content
+            elif existing_memories:
+                reconciled.final_content = str(existing_memories[0]["content"])
+            else:
+                reconciled.final_content = new_memory_content
+
+        # Ensure final_type is set
+        if not reconciled.final_type:
+            reconciled.final_type = (
+                new_memory_type
+                if action == "create"
+                else str(existing_memories[0]["type"])
+                if existing_memories
+                else new_memory_type
+            )
+
+        return reconciled
