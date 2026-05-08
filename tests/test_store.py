@@ -13,6 +13,8 @@ EMBEDDINGS: dict[str, list[float]] = {
     "favorite color is blue": [0.99, 0.01, 0.0],
     "favorite color is red": [0.99, 0.01, 0.0],
     "favorite programming language is python": [0.0, 1.0, 0.0],
+    "name is Edward": [0.9, 0.1, 0.0],
+    "name is Edward Boswell": [0.88, 0.12, 0.0],
 }
 
 
@@ -63,6 +65,7 @@ def test_upsert_semantic_skips_effective_duplicate_without_rewriting_content(
         user_id="user-1",
         content="their favorite food is pizza",
         memory_type="semantic",
+        use_reconciler=False,
     )
 
     assert result.id == original.id
@@ -84,6 +87,7 @@ def test_upsert_semantic_updates_refinement_in_place(
         content="favorite food is pepperoni pizza",
         memory_type="semantic",
         similarity_threshold=0.85,
+        use_reconciler=False,
     )
 
     assert result.id == original.id
@@ -107,6 +111,7 @@ def test_upsert_semantic_does_not_overwrite_nonsemantic_match(
         content="favorite food is pepperoni pizza",
         memory_type="semantic",
         similarity_threshold=0.85,
+        use_reconciler=False,
     )
 
     assert result.id != preference.id
@@ -134,6 +139,7 @@ def test_upsert_semantic_uses_more_than_nearest_vector_candidate(
         content="favorite food is pepperoni pizza",
         memory_type="semantic",
         similarity_threshold=0.5,
+        use_reconciler=False,
     )
 
     assert result.id == target.id
@@ -156,6 +162,7 @@ def test_upsert_semantic_updates_conflicting_same_slot_value(
         content="favorite color is red",
         memory_type="semantic",
         similarity_threshold=0.85,
+        use_reconciler=False,
     )
 
     assert result.id == original.id
@@ -181,6 +188,7 @@ def test_upsert_memories_extract_path_reuses_semantic_upsert_decision(
         user_id="user-1",
         contents=[{"role": "user", "content": "favorite food is pepperoni pizza"}],
         extract=True,
+        use_reconciler=False,
     )
 
     assert len(result) == 1
@@ -215,3 +223,128 @@ def test_extract_paths_call_memory_extractor_module_instead_of_forward(
 
     assert len(result) == 1
     assert result[0].content == "favorite programming language is python"
+
+
+# ---------------------------------------------------------------------------
+# MemoryReconciler integration tests
+# ---------------------------------------------------------------------------
+
+
+class StubReconciler:
+    """Deterministic reconciler for unit tests.
+
+    Returns *keep* when the new content exactly matches an existing one,
+    *update* when the new content is a strict superset of an existing one,
+    and *create* otherwise.
+    """
+
+    def __init__(self):
+        pass
+
+    def __call__(self, *, new_memory_content, new_memory_type, existing_memories):
+        from dspy_memory.models import ReconciledMemory
+
+        for existing in existing_memories:
+            if existing["content"] == new_memory_content:
+                return ReconciledMemory(
+                    action="keep",
+                    memory_id=existing["id"],
+                    final_content=existing["content"],
+                    final_type=existing["type"],
+                )
+            if new_memory_content.startswith(existing["content"] + " "):
+                return ReconciledMemory(
+                    action="update",
+                    memory_id=existing["id"],
+                    final_content=new_memory_content,
+                    final_type=existing["type"],
+                )
+        return ReconciledMemory(
+            action="create",
+            memory_id="",
+            final_content=new_memory_content,
+            final_type=new_memory_type,
+        )
+
+
+def test_reconciler_keeps_exact_match(store, monkeypatch):
+    original = store.create_memory(
+        user_id="user-1",
+        content="name is Edward",
+        memory_type="semantic",
+    )
+
+    monkeypatch.setattr("dspy_memory.store.MemoryReconciler", StubReconciler)
+
+    result = store.upsert_memory(
+        user_id="user-1",
+        content="name is Edward",
+        memory_type="semantic",
+    )
+
+    assert result.id == original.id
+    assert len(_rows(store)) == 1
+    assert _row_by_id(store, original.id)["content"] == "name is Edward"
+
+
+def test_reconciler_updates_refinement(store, monkeypatch):
+    original = store.create_memory(
+        user_id="user-1",
+        content="name is Edward",
+        memory_type="semantic",
+    )
+
+    monkeypatch.setattr("dspy_memory.store.MemoryReconciler", StubReconciler)
+
+    result = store.upsert_memory(
+        user_id="user-1",
+        content="name is Edward Boswell",
+        memory_type="semantic",
+    )
+
+    assert result.id == original.id
+    assert len(_rows(store)) == 1
+    assert _row_by_id(store, original.id)["content"] == "name is Edward Boswell"
+
+
+def test_reconciler_creates_unrelated_memory(store, monkeypatch):
+    store.create_memory(
+        user_id="user-1",
+        content="name is Edward",
+        memory_type="semantic",
+    )
+
+    monkeypatch.setattr("dspy_memory.store.MemoryReconciler", StubReconciler)
+
+    result = store.upsert_memory(
+        user_id="user-1",
+        content="favorite color is blue",
+        memory_type="semantic",
+    )
+
+    assert len(_rows(store)) == 2
+    assert result.content == "favorite color is blue"
+
+
+def test_reconciler_extract_path_consolidates_name(store, monkeypatch):
+    store.create_memory(
+        user_id="user-1",
+        content="name is Edward",
+        memory_type="semantic",
+    )
+
+    monkeypatch.setattr(
+        "dspy_memory.store.MemoryExtractor.forward",
+        lambda self, messages: [("name is Edward Boswell", "semantic")],
+    )
+    monkeypatch.setattr("dspy_memory.store.MemoryReconciler", StubReconciler)
+
+    results = store.upsert_memories(
+        user_id="user-1",
+        contents=[{"role": "user", "content": "My full name is Edward Boswell."}],
+        extract=True,
+    )
+
+    assert len(results) == 1
+    assert len(_rows(store)) == 1
+    assert _rows(store)[0]["content"] == "name is Edward Boswell"
