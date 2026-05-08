@@ -415,6 +415,11 @@ class LanceDSPyMemoryStore:
         use_reranker: bool = False,
         min_relevance_score: float | None = None,
     ) -> Memories:
+        if min_relevance_score is None:
+            min_relevance_score = (
+                0.3 if (self.reranker is not None and use_reranker) else 0.5
+            )
+
         filters = self._build_filters(
             user_id=user_id,
             session_id=session_id or "",
@@ -430,15 +435,11 @@ class LanceDSPyMemoryStore:
         if self.reranker is not None and use_reranker:
             builder = builder.rerank(self.reranker, query_string=query)
             fetch_limit = limit * self.rerank_limit_multiplier
-        elif min_relevance_score is not None:
-            fetch_limit = limit * self.rerank_limit_multiplier
         else:
-            fetch_limit = limit
+            fetch_limit = limit * self.rerank_limit_multiplier
 
         results = builder.where(" AND ".join(filters)).limit(fetch_limit).to_list()
-
-        if min_relevance_score is not None:
-            results = self._filter_by_relevance(results, min_relevance_score)
+        results = self._filter_by_relevance(results, min_relevance_score)
 
         results = results[:limit]
         return self._without_vectors(results)
