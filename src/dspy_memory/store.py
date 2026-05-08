@@ -386,6 +386,23 @@ class LanceDSPyMemoryStore:
         self.table.add([row])
         return self._to_memory(row)
 
+    @staticmethod
+    def _filter_by_relevance(
+        results: list[dict[str, Any]], min_score: float
+    ) -> list[dict[str, Any]]:
+        """Drop results whose relevance score falls below *min_score*."""
+        filtered: list[dict[str, Any]] = []
+        for r in results:
+            if "_relevance_score" in r:
+                score = float(r["_relevance_score"])
+            elif "_distance" in r:
+                score = 1.0 - float(r["_distance"])
+            else:
+                score = 0.0
+            if score >= min_score:
+                filtered.append(r)
+        return filtered
+
     def search_memories(
         self,
         *,
@@ -396,6 +413,7 @@ class LanceDSPyMemoryStore:
         memory_type: MemoryType | str | None = None,
         limit: int = 5,
         use_reranker: bool = False,
+        min_relevance_score: float | None = None,
     ) -> Memories:
         filters = self._build_filters(
             user_id=user_id,
@@ -412,12 +430,17 @@ class LanceDSPyMemoryStore:
         if self.reranker is not None and use_reranker:
             builder = builder.rerank(self.reranker, query_string=query)
             fetch_limit = limit * self.rerank_limit_multiplier
+        elif min_relevance_score is not None:
+            fetch_limit = limit * self.rerank_limit_multiplier
         else:
             fetch_limit = limit
 
-        results = (builder.where(" AND ".join(filters)).limit(fetch_limit).to_list())[
-            :limit
-        ]
+        results = builder.where(" AND ".join(filters)).limit(fetch_limit).to_list()
+
+        if min_relevance_score is not None:
+            results = self._filter_by_relevance(results, min_relevance_score)
+
+        results = results[:limit]
         return self._without_vectors(results)
 
     def update_memory(self, *, memory_id: str, content: str) -> None:
