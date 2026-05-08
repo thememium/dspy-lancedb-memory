@@ -10,6 +10,7 @@ import lancedb
 import pyarrow as pa
 from lancedb.query import LanceVectorQueryBuilder
 from lancedb.rerankers import Reranker
+from lancedb.table import Table
 
 from .extraction import ExtractMemory, MemoryExtractor, MemoryReconciler
 from .models import (
@@ -32,6 +33,7 @@ class LanceDSPyMemoryStore:
         self,
         uri: str = ".lancedb",
         table_name: str = "memories",
+        namespace: list[str] | None = None,
         embedding_lm=None,
         embedding_dim: int = 1536,
         signature=None,
@@ -40,6 +42,8 @@ class LanceDSPyMemoryStore:
     ):
         self.db = lancedb.connect(uri)
         self.table_name = table_name
+        self.namespace: list[str] = list(namespace) if namespace is not None else []
+        self._table_cache: dict[tuple[str, ...], Table] = {}
         self.embedding_dim = embedding_dim
         self.rerank_limit_multiplier = max(rerank_limit_multiplier, 1)
 
@@ -52,7 +56,7 @@ class LanceDSPyMemoryStore:
         self.reranker = reranker
         self._extraction_signature = signature or ExtractMemory
 
-        self.table = self._get_or_create_table()
+        self.table = self._get_or_create_table(self.namespace)
 
     def _embed(self, text: str) -> list[float]:
         # DSPy Embedder accepts a list[str] and returns a 2D embedding array/list.
@@ -177,7 +181,24 @@ class LanceDSPyMemoryStore:
 
         return "update" if new_is_richer or same_slot_replacement else "skip"
 
-    def _get_or_create_table(self):
+    def _get_or_create_table(self, namespace: list[str]):
+        # namespace support requires lancedb >= 0.26.0 (the param exists
+        # but native impl throws NotImplementedError on non-root paths).
+        if namespace:
+            try:
+                return self.db.open_table(self.table_name, namespace=namespace)
+            except NotImplementedError:
+                import warnings
+
+                warnings.warn(
+                    f"Namespace {namespace!r} requires lancedb >= 0.26.0. "
+                    "Using root namespace instead. Upgrade lancedb for full "
+                    "namespace support.",
+                    stacklevel=3,
+                )
+            except Exception:
+                pass
+        # Root namespace or fallback: use existing behaviour.
         if self.table_name in self.db.table_names():
             return self.db.open_table(self.table_name)
 
@@ -213,7 +234,23 @@ class LanceDSPyMemoryStore:
                 }
             ],
             schema=schema,
+            namespace=namespace,
         )
+
+    def _resolve_table(self, namespace: list[str] | None) -> Table:
+        """Return the LanceDB table handle for *namespace*, caching non-default tables.
+
+        When *namespace* is ``None`` or equals :attr:`self.namespace`, the
+        store's default table is returned.  Otherwise the table for that
+        namespace is opened or created on first access and cached.
+        """
+        if namespace is None or namespace == self.namespace:
+            return self.table
+
+        key = tuple(namespace)
+        if key not in self._table_cache:
+            self._table_cache[key] = self._get_or_create_table(namespace)
+        return self._table_cache[key]
 
     def _build_memory_row(
         self,
@@ -288,6 +325,7 @@ class LanceDSPyMemoryStore:
         extract: bool = True,
         memory_type: MemoryType | str | None = None,
         metadata: dict[str, Any] | None = None,
+        namespace: list[str] | None = None,
     ) -> Memories:
         """
         Store content for a user — either raw or extracted from conversation.
@@ -341,6 +379,7 @@ class LanceDSPyMemoryStore:
                         else inferred_type
                     ),
                     metadata=metadata,
+                    namespace=namespace,
                 )
                 for content, inferred_type in extracted
             ]
@@ -362,6 +401,7 @@ class LanceDSPyMemoryStore:
                 else MemoryType.SEMANTIC
             ),
             metadata=metadata,
+            namespace=namespace,
         )
         return self._without_vectors([row])
 
@@ -374,6 +414,7 @@ class LanceDSPyMemoryStore:
         conversation_id: str = "",
         memory_type: MemoryType | str = MemoryType.SEMANTIC,
         metadata: dict[str, Any] | None = None,
+        namespace: list[str] | None = None,
     ) -> Memory:
         row = self._build_memory_row(
             user_id=user_id,
@@ -383,7 +424,8 @@ class LanceDSPyMemoryStore:
             memory_type=memory_type,
             metadata=metadata,
         )
-        self.table.add([row])
+        table = self._resolve_table(namespace)
+        table.add([row])
         return self._to_memory(row)
 
     @staticmethod
@@ -414,6 +456,7 @@ class LanceDSPyMemoryStore:
         limit: int = 5,
         use_reranker: bool = False,
         min_relevance_score: float | None = None,
+        namespace: list[str] | None = None,
     ) -> Memories:
         if min_relevance_score is None:
             min_relevance_score = (
@@ -427,9 +470,10 @@ class LanceDSPyMemoryStore:
             memory_type=self._memory_type_value(memory_type),
         )
 
+        table = self._resolve_table(namespace)
         builder = cast(
             LanceVectorQueryBuilder,
-            self.table.search(self._embed(query), vector_column_name="vector"),
+            table.search(self._embed(query), vector_column_name="vector"),
         )
 
         if self.reranker is not None and use_reranker:
@@ -444,16 +488,23 @@ class LanceDSPyMemoryStore:
         results = results[:limit]
         return self._without_vectors(results)
 
-    def update_memory(self, *, memory_id: str, content: str) -> None:
-        old = self.table.search().where(f"id = '{memory_id}'").to_list()
+    def update_memory(
+        self,
+        *,
+        memory_id: str,
+        content: str,
+        namespace: list[str] | None = None,
+    ) -> None:
+        table = self._resolve_table(namespace)
+        old = table.search().where(f"id = '{memory_id}'").to_list()
         if not old:
             return
         row = dict(old[0])
         row["content"] = content
         row["updated_at"] = datetime.now(timezone.utc).isoformat()
         row["vector"] = self._embed(content)
-        self.table.delete(f"id = '{memory_id}'")
-        self.table.add([row])
+        table.delete(f"id = '{memory_id}'")
+        table.add([row])
 
     def upsert_memories(
         self,
@@ -467,6 +518,7 @@ class LanceDSPyMemoryStore:
         metadata: dict[str, Any] | None = None,
         similarity_threshold: float = 0.85,
         use_reconciler: bool = True,
+        namespace: list[str] | None = None,
     ) -> Memories:
         """Batch upsert — insert, update, or skip memories based on semantic
         similarity.  Mirrors :meth:`create_memories` but uses
@@ -524,6 +576,7 @@ class LanceDSPyMemoryStore:
 
             if use_reconciler:
                 reconciler = MemoryReconciler()
+                table = self._resolve_table(namespace)
                 results: list[Memory] = []
                 for content, inferred_type in extracted:
                     memory_type_str = (
@@ -545,9 +598,7 @@ class LanceDSPyMemoryStore:
                         ),
                     )
                     candidates = (
-                        self.table.search(
-                            self._embed(content), vector_column_name="vector"
-                        )
+                        table.search(self._embed(content), vector_column_name="vector")
                         .where(" AND ".join(filters))
                         .limit(self._UPSERT_CANDIDATE_LIMIT)
                         .to_list()
@@ -577,7 +628,7 @@ class LanceDSPyMemoryStore:
 
                     if decision.action == "keep":
                         kept = (
-                            self.table.search()
+                            table.search()
                             .where(f"id = '{decision.memory_id}'")
                             .to_list()
                         )
@@ -587,9 +638,10 @@ class LanceDSPyMemoryStore:
                         self.update_memory(
                             memory_id=decision.memory_id,
                             content=decision.final_content,
+                            namespace=namespace,
                         )
                         updated = (
-                            self.table.search()
+                            table.search()
                             .where(f"id = '{decision.memory_id}'")
                             .to_list()
                         )
@@ -604,6 +656,7 @@ class LanceDSPyMemoryStore:
                                 conversation_id=conversation_id,
                                 memory_type=memory_type_str,
                                 metadata=metadata,
+                                namespace=namespace,
                             )
                         )
 
@@ -624,6 +677,7 @@ class LanceDSPyMemoryStore:
                     metadata=metadata,
                     similarity_threshold=similarity_threshold,
                     use_reconciler=False,
+                    namespace=namespace,
                 )
                 for content, inferred_type in extracted
             ]
@@ -647,6 +701,7 @@ class LanceDSPyMemoryStore:
             metadata=metadata,
             similarity_threshold=similarity_threshold,
             use_reconciler=use_reconciler,
+            namespace=namespace,
         )
         return [row]
 
@@ -661,6 +716,7 @@ class LanceDSPyMemoryStore:
         metadata: dict[str, Any] | None = None,
         similarity_threshold: float = 0.85,
         use_reconciler: bool = True,
+        namespace: list[str] | None = None,
     ) -> Memory:
         """Insert or update a memory based on semantic similarity.
 
@@ -697,12 +753,16 @@ class LanceDSPyMemoryStore:
             candidates are fed to an LLM-based :class:`MemoryReconciler` to
             decide whether to keep, update, or create. Set to ``False`` to
             use the fast heuristic fallback instead.
+        namespace : list[str] | None
+            LanceDB namespace path.  ``None`` (default) uses the store's
+            configured namespace.
 
         Returns
         -------
         Memory
             The resulting memory row.
         """
+        table = self._resolve_table(namespace)
         resolved_type = self._memory_type_value(memory_type)
         candidate_limit = self._UPSERT_CANDIDATE_LIMIT
 
@@ -715,7 +775,7 @@ class LanceDSPyMemoryStore:
             ),
         )
         results = (
-            self.table.search(self._embed(content), vector_column_name="vector")
+            table.search(self._embed(content), vector_column_name="vector")
             .where(" AND ".join(filters))
             .limit(candidate_limit)
             .to_list()
@@ -743,7 +803,7 @@ class LanceDSPyMemoryStore:
 
                     if decision.action == "keep":
                         kept = (
-                            self.table.search()
+                            table.search()
                             .where(f"id = '{decision.memory_id}'")
                             .to_list()
                         )
@@ -753,9 +813,10 @@ class LanceDSPyMemoryStore:
                         self.update_memory(
                             memory_id=decision.memory_id,
                             content=decision.final_content,
+                            namespace=namespace,
                         )
                         updated = (
-                            self.table.search()
+                            table.search()
                             .where(f"id = '{decision.memory_id}'")
                             .to_list()
                         )
@@ -774,10 +835,12 @@ class LanceDSPyMemoryStore:
                             return self._without_vectors([existing])[0]
                         if action == "update":
                             self.update_memory(
-                                memory_id=str(existing["id"]), content=content
+                                memory_id=str(existing["id"]),
+                                content=content,
+                                namespace=namespace,
                             )
                             updated = (
-                                self.table.search()
+                                table.search()
                                 .where(f"id = '{existing['id']}'")
                                 .to_list()
                             )
@@ -793,10 +856,12 @@ class LanceDSPyMemoryStore:
                 cosine_sim = 1.0 - distance
 
                 if cosine_sim >= similarity_threshold:
-                    self.update_memory(memory_id=str(existing["id"]), content=content)
-                    updated = (
-                        self.table.search().where(f"id = '{existing['id']}'").to_list()
+                    self.update_memory(
+                        memory_id=str(existing["id"]),
+                        content=content,
+                        namespace=namespace,
                     )
+                    updated = table.search().where(f"id = '{existing['id']}'").to_list()
                     return self._without_vectors([dict(updated[0])])[0]
 
         # --- No match → create ---
@@ -809,9 +874,13 @@ class LanceDSPyMemoryStore:
                     conversation_id=conversation_id,
                     memory_type=memory_type,
                     metadata=metadata,
+                    namespace=namespace,
                 )
             ]
         )[0]
 
-    def delete_memory(self, *, memory_id: str) -> None:
-        self.table.delete(f"id = '{memory_id}'")
+    def delete_memory(
+        self, *, memory_id: str, namespace: list[str] | None = None
+    ) -> None:
+        table = self._resolve_table(namespace)
+        table.delete(f"id = '{memory_id}'")
