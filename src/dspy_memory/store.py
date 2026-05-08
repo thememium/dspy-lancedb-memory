@@ -11,8 +11,14 @@ import pyarrow as pa
 from lancedb.query import LanceVectorQueryBuilder
 from lancedb.rerankers import Reranker
 
-from .extraction import ExtractMemory, MemoryExtractor
-from .models import Memories, Memory, MemoryType, memory_type_from_string
+from .extraction import ExtractMemory, MemoryExtractor, MemoryReconciler
+from .models import (
+    Memories,
+    Memory,
+    MemoryType,
+    ReconciledMemory,
+    memory_type_from_string,
+)
 
 _SEMANTIC_DUPLICATE_STOPWORDS = frozenset(
     {"a", "an", "the", "their", "his", "her", "our", "my", "your"}
@@ -424,6 +430,7 @@ class LanceDSPyMemoryStore:
         memory_type: MemoryType | str | None = None,
         metadata: dict[str, Any] | None = None,
         similarity_threshold: float = 0.85,
+        use_reconciler: bool = True,
     ) -> Memories:
         """Batch upsert — insert, update, or skip memories based on semantic
         similarity.  Mirrors :meth:`create_memories` but uses
@@ -458,6 +465,11 @@ class LanceDSPyMemoryStore:
         similarity_threshold : float
             Cosine similarity threshold forwarded to :meth:`upsert_memory`.
             Default ``0.85``.
+        use_reconciler : bool
+            When ``True`` (default), extracted semantic memories are reconciled
+            against existing candidates via an LLM-based :class:`MemoryReconciler`
+            before any write. Set to ``False`` to skip the LLM and use the fast
+            heuristic fallback.
 
         Returns
         -------
@@ -474,6 +486,94 @@ class LanceDSPyMemoryStore:
                 extractor(messages=contents),
             )
 
+            if use_reconciler:
+                reconciler = MemoryReconciler()
+                results: list[Memory] = []
+                for content, inferred_type in extracted:
+                    memory_type_str = (
+                        memory_type_from_string(memory_type)
+                        if memory_type is not None
+                        else inferred_type
+                    )
+                    memory_type_value = self._memory_type_value(memory_type_str)
+
+                    # Retrieve candidates for reconciliation
+                    filters = self._build_filters(
+                        user_id=user_id,
+                        session_id=session_id,
+                        conversation_id=conversation_id,
+                        memory_type=(
+                            memory_type_value
+                            if memory_type_value == MemoryType.SEMANTIC.value
+                            else None
+                        ),
+                    )
+                    candidates = (
+                        self.table.search(
+                            self._embed(content), vector_column_name="vector"
+                        )
+                        .where(" AND ".join(filters))
+                        .limit(self._UPSERT_CANDIDATE_LIMIT)
+                        .to_list()
+                    )
+
+                    if candidates:
+                        existing_list = [
+                            {
+                                "id": str(c["id"]),
+                                "content": str(c["content"]),
+                                "type": str(c["memory_type"]),
+                            }
+                            for c in candidates
+                        ]
+                        decision = reconciler(
+                            new_memory_content=content,
+                            new_memory_type=str(memory_type_str),
+                            existing_memories=existing_list,
+                        )
+                    else:
+                        decision = ReconciledMemory(
+                            action="create",
+                            memory_id="",
+                            final_content=content,
+                            final_type=str(memory_type_str),
+                        )
+
+                    if decision.action == "keep":
+                        kept = (
+                            self.table.search()
+                            .where(f"id = '{decision.memory_id}'")
+                            .to_list()
+                        )
+                        if kept:
+                            results.append(self._without_vectors([dict(kept[0])])[0])
+                    elif decision.action == "update":
+                        self.update_memory(
+                            memory_id=decision.memory_id,
+                            content=decision.final_content,
+                        )
+                        updated = (
+                            self.table.search()
+                            .where(f"id = '{decision.memory_id}'")
+                            .to_list()
+                        )
+                        if updated:
+                            results.append(self._without_vectors([dict(updated[0])])[0])
+                    else:  # create
+                        results.append(
+                            self.create_memory(
+                                user_id=user_id,
+                                content=decision.final_content,
+                                session_id=session_id,
+                                conversation_id=conversation_id,
+                                memory_type=memory_type_str,
+                                metadata=metadata,
+                            )
+                        )
+
+                return results
+
+            # Fast fallback: delegate each extracted memory to upsert_memory
             stored = [
                 self.upsert_memory(
                     user_id=user_id,
@@ -487,6 +587,7 @@ class LanceDSPyMemoryStore:
                     ),
                     metadata=metadata,
                     similarity_threshold=similarity_threshold,
+                    use_reconciler=False,
                 )
                 for content, inferred_type in extracted
             ]
@@ -509,6 +610,7 @@ class LanceDSPyMemoryStore:
             ),
             metadata=metadata,
             similarity_threshold=similarity_threshold,
+            use_reconciler=use_reconciler,
         )
         return [row]
 
@@ -522,6 +624,7 @@ class LanceDSPyMemoryStore:
         memory_type: MemoryType | str = MemoryType.SEMANTIC,
         metadata: dict[str, Any] | None = None,
         similarity_threshold: float = 0.85,
+        use_reconciler: bool = True,
     ) -> Memory:
         """Insert or update a memory based on semantic similarity.
 
@@ -553,6 +656,11 @@ class LanceDSPyMemoryStore:
         similarity_threshold : float
             Minimum cosine similarity (0‑1) to consider two memories
             semantically equivalent.  Default ``0.85``.
+        use_reconciler : bool
+            When ``True`` (default) and the memory type is ``"semantic"``,
+            candidates are fed to an LLM-based :class:`MemoryReconciler` to
+            decide whether to keep, update, or create. Set to ``False`` to
+            use the fast heuristic fallback instead.
 
         Returns
         -------
@@ -579,26 +687,65 @@ class LanceDSPyMemoryStore:
 
         if results:
             if resolved_type == MemoryType.SEMANTIC.value:
-                for candidate in results:
-                    existing = dict(candidate)
-                    action = self._semantic_match_action(
-                        new_content=content,
-                        existing_content=str(existing["content"]),
-                        distance=float(existing.get("_distance", 1.0)),
-                        similarity_threshold=similarity_threshold,
+                if use_reconciler:
+                    # Use the LLM reconciler for nuanced keep/update/create
+                    # decisions among the semantic candidate pool.
+                    reconciler = MemoryReconciler()
+                    existing_list = [
+                        {
+                            "id": str(c["id"]),
+                            "content": str(c["content"]),
+                            "type": str(c["memory_type"]),
+                        }
+                        for c in results
+                    ]
+                    decision = reconciler(
+                        new_memory_content=content,
+                        new_memory_type=str(resolved_type),
+                        existing_memories=existing_list,
                     )
-                    if action == "skip":
-                        return self._without_vectors([existing])[0]
-                    if action == "update":
+
+                    if decision.action == "keep":
+                        kept = (
+                            self.table.search()
+                            .where(f"id = '{decision.memory_id}'")
+                            .to_list()
+                        )
+                        if kept:
+                            return self._without_vectors([dict(kept[0])])[0]
+                    elif decision.action == "update":
                         self.update_memory(
-                            memory_id=str(existing["id"]), content=content
+                            memory_id=decision.memory_id,
+                            content=decision.final_content,
                         )
                         updated = (
                             self.table.search()
-                            .where(f"id = '{existing['id']}'")
+                            .where(f"id = '{decision.memory_id}'")
                             .to_list()
                         )
-                        return self._without_vectors([dict(updated[0])])[0]
+                        if updated:
+                            return self._without_vectors([dict(updated[0])])[0]
+                else:
+                    for candidate in results:
+                        existing = dict(candidate)
+                        action = self._semantic_match_action(
+                            new_content=content,
+                            existing_content=str(existing["content"]),
+                            distance=float(existing.get("_distance", 1.0)),
+                            similarity_threshold=similarity_threshold,
+                        )
+                        if action == "skip":
+                            return self._without_vectors([existing])[0]
+                        if action == "update":
+                            self.update_memory(
+                                memory_id=str(existing["id"]), content=content
+                            )
+                            updated = (
+                                self.table.search()
+                                .where(f"id = '{existing['id']}'")
+                                .to_list()
+                            )
+                            return self._without_vectors([dict(updated[0])])[0]
             else:
                 for candidate in results:
                     existing = dict(candidate)
