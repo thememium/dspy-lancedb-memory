@@ -60,6 +60,7 @@ def configure(
     embedding_dim: int | None = None,
     uri: str | None = None,
     table_name: str | None = None,
+    namespace: list[str] | None = None,
     signature=None,
     reranker_lm: dspy.LM | str | None = None,
 ):
@@ -82,6 +83,10 @@ def configure(
         LanceDB URI (directory path).  Fallback for ``Store()``.
     table_name :
         LanceDB table name.  Fallback for ``Store()``.
+    namespace :
+        LanceDB namespace path as a list of components, e.g.
+        ``["prod", "search"]``.  Empty list ``[]`` means root namespace
+        (the default).  Fallback for ``Store()``.
     signature :
         A DSPy ``Signature`` subclass for memory extraction.
     reranker_lm :
@@ -100,6 +105,7 @@ def configure(
             reranker_lm=dspy.LM("openrouter/cohere/rerank-4-fast"),
             uri=".my_memories",
             table_name="user_data",
+            namespace=["my_app", "v1"],
         )
     """
     _configure(
@@ -109,6 +115,7 @@ def configure(
         embedding_dim=embedding_dim,
         uri=uri,
         table_name=table_name,
+        namespace=namespace,
         signature=signature,
         reranker_lm=reranker_lm,
     )
@@ -122,6 +129,7 @@ def configure(
 def Store(
     uri: str | None | Any = _UNSET,
     table_name: str | None | Any = _UNSET,
+    namespace: list[str] | None | Any = _UNSET,
     embedding_lm=None,
     embedding_dim: int | None = None,
     signature=None,
@@ -137,6 +145,10 @@ def Store(
         LanceDB URI.  Falls back to :func:`configure`, then ``".lancedb"``.
     table_name :
         LanceDB table name.  Falls back to :func:`configure`, then ``"memories"``.
+    namespace :
+        LanceDB namespace path as a list of components, e.g.
+        ``["prod", "search"]``.  Falls back to :func:`configure`, then
+        ``[]`` (root namespace).
     embedding_lm :
         ``dspy.LM`` for embeddings.  Falls back to :func:`configure`, then
         ``dspy.LM("openrouter/openai/text-embedding-3-small")``.
@@ -162,12 +174,14 @@ def Store(
     -------
     LanceDSPyMemoryStore
     """
-    if uri is _UNSET or table_name is _UNSET:
-        cfg_uri, cfg_table = get_store_config()
+    if uri is _UNSET or table_name is _UNSET or namespace is _UNSET:
+        cfg_uri, cfg_table, cfg_namespace = get_store_config()
         if uri is _UNSET:
             uri = cfg_uri
         if table_name is _UNSET:
             table_name = cfg_table
+        if namespace is _UNSET:
+            namespace = cfg_namespace
     assert isinstance(uri, str) and isinstance(table_name, str)
 
     if embedding_lm is None or embedding_dim is None:
@@ -198,6 +212,7 @@ def Store(
     return LanceDSPyMemoryStore(
         uri=uri,
         table_name=table_name,
+        namespace=namespace,
         embedding_lm=embedding_lm,
         embedding_dim=embedding_dim,
         signature=signature,
