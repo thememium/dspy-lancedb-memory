@@ -254,3 +254,117 @@ for m in upserted:
     #   - semantic match → update
     #   - no match → insert
     print(f"  [{m.memory_type}] {m.content}")
+
+# ===========================================================================
+# 9. Namespace — isolate memories by environment, team, or feature
+# ===========================================================================
+
+# Namespaces keep memories separate within the same LanceDB database.
+# Useful for multi-tenant apps, A/B testing, or separating dev / prod data.
+
+# 9a. Configure namespace globally — all stores inherit it
+memory.configure(
+    extraction_lm=dspy.LM("openrouter/openai/gpt-4o-mini"),
+    embedding_lm=dspy.LM("openrouter/openai/text-embedding-3-small"),
+    namespace=["production", "app_v1"],
+)
+
+prod_store = memory.Store()
+prod_store.create_memory(
+    user_id="user_123",
+    content="Production config: timeout=30s, retries=3",
+    memory_type="semantic",
+)
+
+# 9b. Override namespace per store
+dev_store = memory.Store(namespace=["development", "app_v1"])
+dev_store.create_memory(
+    user_id="user_123",
+    content="Dev config: timeout=5s, retries=0",
+    memory_type="semantic",
+)
+
+# Each store operates in its own namespace — they don't see each other's data
+prod_results = prod_store.search_memories(user_id="user_123", query="timeout config")
+dev_results = dev_store.search_memories(user_id="user_123", query="timeout config")
+print(f"Prod namespace results: {len(prod_results)}")
+print(f"Dev namespace results: {len(dev_results)}")
+
+# 9c. Per-operation namespace override — write or read outside the store's
+# default namespace without creating a second store.
+prod_store.create_memory(
+    user_id="user_123",
+    content="Shared config: feature-flags enabled",
+    memory_type="semantic",
+    namespace=["shared", "analytics"],
+)
+
+shared_results = prod_store.search_memories(
+    user_id="user_123",
+    query="feature flags",
+    namespace=["shared", "analytics"],
+)
+print(f"Shared namespace results: {len(shared_results)}")
+
+# 9d. Namespace + session / conversation scoping — all scoping fields compose
+prod_store.create_memory(
+    user_id="user_123",
+    content="Production incident: memory leak in worker v2.1",
+    memory_type="episodic",
+    session_id="incident_42",
+    namespace=["production", "incidents"],
+)
+
+incident_results = prod_store.search_memories(
+    user_id="user_123",
+    session_id="incident_42",
+    query="memory leak",
+    namespace=["production", "incidents"],
+)
+print(f"Incident namespace + session filter: {len(incident_results)} result(s)")
+
+# 9e. Extract memories directly into a namespace
+extract_store = memory.Store(namespace=["extracted", "v1"])
+extracted = extract_store.create_memories(
+    user_id="user_123",
+    contents=[
+        {
+            "role": "user",
+            "content": (
+                "I prefer tabs over spaces and use uv for Python packaging. "
+                "My editor is VS Code with vim keybindings."
+            ),
+        },
+    ],
+    extract=True,
+    namespace=["extracted", "v1"],
+)
+print(f"Extracted into namespace: {len(extracted)} memory(s)")
+
+# 9f. Upsert within a namespace
+extract_store.upsert_memory(
+    user_id="user_123",
+    content="I prefer tabs over spaces and use uv for Python packaging.",
+    memory_type="preference",
+    namespace=["extracted", "v1"],
+)
+
+# 9g. Delete from a specific namespace
+extract_store.delete_memory(
+    memory_id=extracted[0].id,
+    namespace=["extracted", "v1"],
+)
+print("Namespace delete: OK")
+
+# 9h. Empty namespace (root) — creating a store with namespace=[] uses the
+# LanceDB root namespace, keeping data fully isolated from named namespaces.
+root_store = memory.Store(namespace=[])
+root_store.create_memory(
+    user_id="user_123",
+    content="Root-namespace memory — isolated from production and dev.",
+    memory_type="semantic",
+)
+
+root_results = root_store.search_memories(user_id="user_123", query="root namespace")
+# Should find only the memory stored above — nothing from prod or dev namespaces
+print(f"Root namespace results: {len(root_results)}")
