@@ -250,7 +250,28 @@ upserted = store.upsert_memories(
 
 for m in upserted:
     # Each extracted memory was independently upserted:
-    #   - exact match → skip
-    #   - semantic match → update
-    #   - no match → insert
+    #   - exact match -> skip
+    #   - semantic match -> update
+    #   - no match -> insert
     print(f"  [{m.memory_type}] {m.content}")
+
+# ===========================================================================
+# 9. Process memories with deletion intent
+# ===========================================================================
+
+# If a user asks to delete or remove a memory, the process_memories method
+# can detect that intent and actually delete the matching memory.
+created, deleted = store.process_memories(
+    user_id="user_123",
+    contents=[
+        {
+            "role": "user",
+            "content": "Please forget that I mentioned the climate RAG pipeline. Delete that memory.",
+        },
+    ],
+    extract=True,
+)
+
+print(f"Created: {len(created)} memories, Deleted: {len(deleted)} memories")
+for d in deleted:
+    print(f"  Deleted: [{d.memory_type}] {d.content}")
