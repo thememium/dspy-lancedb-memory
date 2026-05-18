@@ -1,16 +1,16 @@
 <a name="readme-top"></a>
 
 <div align="center">
-  <h3 align="center">DSPy Memory</h3>
+  <h3 align="center">DSPy LanceDB Memory</h3>
 
   <p align="center">
     Persistent vector memory store for DSPy-powered AI agents — extract, store, and recall structured memories from conversation.
     <br />
     <a href="#table-of-contents"><strong>Explore the Documentation »</strong></a>
     <br />
-    <a href="https://github.com/thememium/dspy-memory/issues">Report Bug</a>
+    <a href="https://github.com/thememium/dspy-lancedb-memory/issues">Report Bug</a>
     ·
-    <a href="https://github.com/thememium/dspy-memory/issues">Request Feature</a>
+    <a href="https://github.com/thememium/dspy-lancedb-memory/issues">Request Feature</a>
   </p>
 </div>
 
@@ -61,16 +61,16 @@ export OPENROUTER_API_KEY="sk-or-v1-..."
 
 ### Install
 
-Install dspy-memory with uv (recommended)
+Install dspy-lancedb-memory with uv (recommended)
 
 ```bash
-uv add dspy-memory
+uv add dspy-lancedb-memory
 ```
 
 Install with pip (alternative)
 
 ```bash
-pip install dspy-memory
+pip install dspy-lancedb-memory
 ```
 
 <p align="right">(<a href="#readme-top">back to top</a>)</p>
@@ -82,7 +82,7 @@ pip install dspy-memory
 ### Basic Usage
 
 ```python
-from dspy_memory import memory
+from dspy_lancedb_memory import memory
 import dspy
 
 # Configure: extraction LM, embedding LM, and optional reranker LM
@@ -126,7 +126,7 @@ print(results)
 The real power is automatic extraction. Pass a conversation turn and the LLM extracts all salient memories, each categorized by type.
 
 ```python
-from dspy_memory import memory
+from dspy_lancedb_memory import memory
 import dspy
 
 memory.configure(extraction_lm=dspy.LM("openrouter/openai/gpt-4o-mini"))
@@ -159,7 +159,7 @@ for m in created:
 ### Search with Memory Type and Reranking
 
 ```python
-from dspy_memory import memory
+from dspy_lancedb_memory import memory
 import dspy
 
 memory.configure(
@@ -287,7 +287,7 @@ same DSPy extraction — but each extracted memory goes through the upsert
 decision instead of a blind insert.
 
 ```python
-from dspy_memory import memory
+from dspy_lancedb_memory import memory
 import dspy
 
 memory.configure(extraction_lm=dspy.LM("openrouter/openai/gpt-4o-mini"))
@@ -321,7 +321,7 @@ for m in upserted:
 The easiest way — configure via ``memory.configure(reranker_lm=...)`` with a ``dspy.LM`` and `memory.Store()` picks it up automatically:
 
 ```python
-from dspy_memory import memory
+from dspy_lancedb_memory import memory
 import dspy
 
 memory.configure(
@@ -340,7 +340,7 @@ memory.configure(reranker_lm="cohere/rerank-english-v3.0")
 For full control (custom column, top_n, etc.), build a ``LiteLLMReranker`` and pass it to ``Store()``:
 
 ```python
-from dspy_memory import LiteLLMReranker
+from dspy_lancedb_memory import LiteLLMReranker
 
 reranker = LiteLLMReranker(
     model="cohere/rerank-english-v3.0",
@@ -354,7 +354,7 @@ store = memory.Store(reranker=reranker)
 For full control (custom column, top_n, etc.), build a ``LiteLLMReranker`` and pass it to ``Store()``:
 
 ```python
-from dspy_memory import LiteLLMReranker
+from dspy_lancedb_memory import LiteLLMReranker
 
 reranker = LiteLLMReranker(
     model="cohere/rerank-english-v3.0",
@@ -374,7 +374,7 @@ The model string uses the same ``provider/model`` format as ``dspy.LM`` — e.g.
 Everything — including LanceDB defaults — in one call:
 
 ```python
-from dspy_memory import memory
+from dspy_lancedb_memory import memory
 import dspy
 
 memory.configure(
