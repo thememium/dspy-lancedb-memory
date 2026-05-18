@@ -4,7 +4,7 @@ from types import SimpleNamespace
 
 import pytest
 
-from dspy_memory.store import LanceDSPyMemoryStore
+from dspy_lancedb_memory.store import LanceDSPyMemoryStore
 
 EMBEDDINGS: dict[str, list[float]] = {
     "favorite food is pizza": [1.0, 0.0, 0.0],
@@ -180,7 +180,7 @@ def test_upsert_memories_extract_path_reuses_semantic_upsert_decision(
     )
 
     monkeypatch.setattr(
-        "dspy_memory.store.MemoryExtractor.forward",
+        "dspy_lancedb_memory.store.MemoryExtractor.forward",
         lambda self, messages: [("favorite food is pepperoni pizza", "semantic")],
     )
 
@@ -212,7 +212,7 @@ def test_extract_paths_call_memory_extractor_module_instead_of_forward(
         def forward(self, messages):
             raise AssertionError("forward() should not be called directly")
 
-    monkeypatch.setattr("dspy_memory.store.MemoryExtractor", DummyExtractor)
+    monkeypatch.setattr("dspy_lancedb_memory.store.MemoryExtractor", DummyExtractor)
 
     method = getattr(store, method_name)
     result = method(
@@ -242,7 +242,7 @@ class StubReconciler:
         pass
 
     def __call__(self, *, new_memory_content, new_memory_type, existing_memories):
-        from dspy_memory.models import ReconciledMemory
+        from dspy_lancedb_memory.models import ReconciledMemory
 
         for existing in existing_memories:
             if existing["content"] == new_memory_content:
@@ -274,7 +274,7 @@ def test_reconciler_keeps_exact_match(store, monkeypatch):
         memory_type="semantic",
     )
 
-    monkeypatch.setattr("dspy_memory.store.MemoryReconciler", StubReconciler)
+    monkeypatch.setattr("dspy_lancedb_memory.store.MemoryReconciler", StubReconciler)
 
     result = store.upsert_memory(
         user_id="user-1",
@@ -294,7 +294,7 @@ def test_reconciler_updates_refinement(store, monkeypatch):
         memory_type="semantic",
     )
 
-    monkeypatch.setattr("dspy_memory.store.MemoryReconciler", StubReconciler)
+    monkeypatch.setattr("dspy_lancedb_memory.store.MemoryReconciler", StubReconciler)
 
     result = store.upsert_memory(
         user_id="user-1",
@@ -314,7 +314,7 @@ def test_reconciler_creates_unrelated_memory(store, monkeypatch):
         memory_type="semantic",
     )
 
-    monkeypatch.setattr("dspy_memory.store.MemoryReconciler", StubReconciler)
+    monkeypatch.setattr("dspy_lancedb_memory.store.MemoryReconciler", StubReconciler)
 
     result = store.upsert_memory(
         user_id="user-1",
@@ -334,10 +334,10 @@ def test_reconciler_extract_path_consolidates_name(store, monkeypatch):
     )
 
     monkeypatch.setattr(
-        "dspy_memory.store.MemoryExtractor.forward",
+        "dspy_lancedb_memory.store.MemoryExtractor.forward",
         lambda self, messages: [("name is Edward Boswell", "semantic")],
     )
-    monkeypatch.setattr("dspy_memory.store.MemoryReconciler", StubReconciler)
+    monkeypatch.setattr("dspy_lancedb_memory.store.MemoryReconciler", StubReconciler)
 
     results = store.upsert_memories(
         user_id="user-1",

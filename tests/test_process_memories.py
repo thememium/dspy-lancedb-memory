@@ -4,8 +4,8 @@ from types import SimpleNamespace
 
 import pytest
 
-from dspy_memory.models import MemoryOperation
-from dspy_memory.store import LanceDSPyMemoryStore
+from dspy_lancedb_memory.models import MemoryOperation
+from dspy_lancedb_memory.store import LanceDSPyMemoryStore
 
 EMBEDDINGS: dict[str, list[float]] = {
     "favorite food is pizza": [1.0, 0.0, 0.0],
@@ -95,7 +95,7 @@ def test_process_memories_updates_when_extract_returns_update(store, monkeypatch
     )
 
     monkeypatch.setattr(
-        "dspy_memory.store.MemoryOperationExtractor.forward",
+        "dspy_lancedb_memory.store.MemoryOperationExtractor.forward",
         lambda self, messages: [
             MemoryOperation(
                 action="update",
@@ -127,7 +127,7 @@ def test_process_memories_deletes_when_extract_returns_delete(store, monkeypatch
     )
 
     monkeypatch.setattr(
-        "dspy_memory.store.MemoryOperationExtractor.forward",
+        "dspy_lancedb_memory.store.MemoryOperationExtractor.forward",
         lambda self, messages: [
             MemoryOperation(
                 action="delete",
@@ -151,7 +151,7 @@ def test_process_memories_deletes_when_extract_returns_delete(store, monkeypatch
 
 def test_process_memories_creates_when_extract_returns_create(store, monkeypatch):
     monkeypatch.setattr(
-        "dspy_memory.store.MemoryOperationExtractor.forward",
+        "dspy_lancedb_memory.store.MemoryOperationExtractor.forward",
         lambda self, messages: [
             MemoryOperation(
                 action="create",
@@ -190,7 +190,7 @@ def test_process_memories_verbatim_non_extract_creates(store):
 
 def test_process_memories_skips_invalid_actions(store, monkeypatch):
     monkeypatch.setattr(
-        "dspy_memory.store.MemoryOperationExtractor.forward",
+        "dspy_lancedb_memory.store.MemoryOperationExtractor.forward",
         lambda self, messages: [
             MemoryOperation(
                 action="invalid",
@@ -218,7 +218,7 @@ def test_process_memories_delete_with_exact_match(store, monkeypatch):
     )
 
     monkeypatch.setattr(
-        "dspy_memory.store.MemoryOperationExtractor.forward",
+        "dspy_lancedb_memory.store.MemoryOperationExtractor.forward",
         lambda self, messages: [
             MemoryOperation(
                 action="delete",
@@ -247,7 +247,7 @@ def test_process_memories_multiple_operations(store, monkeypatch):
     )
 
     monkeypatch.setattr(
-        "dspy_memory.store.MemoryOperationExtractor.forward",
+        "dspy_lancedb_memory.store.MemoryOperationExtractor.forward",
         lambda self, messages: [
             MemoryOperation(
                 action="delete",
