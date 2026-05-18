@@ -1,6 +1,70 @@
 import dspy
 
-from .models import MemoryItem, MemoryType, ReconciledMemory, memory_type_from_string
+from .models import (
+    MemoryItem,
+    MemoryOperation,
+    MemoryType,
+    ReconciledMemory,
+    memory_type_from_string,
+)
+
+
+class ExtractMemoryOperations(dspy.Signature):
+    """
+    Analyze a conversation turn and extract any memory operations the user wants to perform.
+
+    Instructions
+    ------------
+    1. Read the provided messages carefully.
+    2. Determine if the user is requesting any changes to their stored memories.
+    3. For each detected intent, output a MemoryOperation:
+       * ``action``      — one of: **create**, **update**, **delete**
+       * ``content``     — for create/update: the new memory text; for delete: the
+                         specific text of the memory to remove (if provided verbatim)
+       * ``search_query``— for delete: a natural-language description of the memory
+                         to delete (used when no exact text is given)
+       * ``memory_type`` — the memory category (e.g., preference, semantic, episodic).
+                         Use ``""`` if the type is not specified or unclear.
+
+    Guidelines
+    ----------
+    - Create: user introduces a new fact, preference, or information explicitly.
+    - Update: user corrects, refines, or changes an existing piece of information.
+    - Delete: user explicitly asks to forget, remove, or delete a memory.
+              Set ``content`` to the exact text if stated, otherwise use
+              ``search_query`` to describe what should be removed.
+    - If no memory-related operations are found, return an empty list.
+    """
+
+    messages: list[dict[str, str]] = dspy.InputField()
+    operations: list[MemoryOperation] = dspy.OutputField(
+        desc="All memory operations extracted from the conversation. Empty list if none."
+    )
+
+
+class MemoryOperationExtractor(dspy.Module):
+    """Wraps a DSPy Signature in ChainOfThought for reliable memory
+    operation extraction (create/update/delete intents)."""
+
+    def __init__(self, signature=ExtractMemoryOperations):
+        super().__init__()
+        self.extract = dspy.ChainOfThought(signature)
+
+    def forward(self, messages: list[dict[str, str]]) -> list[MemoryOperation]:
+        prediction: dspy.Prediction = self.extract(messages=messages)
+        ops: list[MemoryOperation] = prediction.operations
+        if not isinstance(ops, list):
+            ops = [ops] if ops else []
+
+        cleaned: list[MemoryOperation] = []
+        for op in ops:
+            action = (op.action or "").strip().lower()
+            if action not in ("create", "update", "delete"):
+                continue
+            op.action = action
+            cleaned.append(op)
+
+        return cleaned
 
 
 class ExtractMemory(dspy.Signature):
