@@ -1,5 +1,5 @@
 [project]
-name = "dspy-memory"
+name = "dspy-lancedb-memory"
 version = "0.1.2"
 description = "Add your description here"
 readme = "README.md"
@@ -15,7 +15,7 @@ dependencies = [
 ]
 
 [project.scripts]
-dspy-memory = "dspy_memory:main"
+dspy-lancedb-memory = "dspy_lancedb_memory:main"
 
 [build-system]
 requires = ["uv_build>=0.11.6,<0.12.0"]
@@ -33,7 +33,7 @@ dev = [
 ]
 
 [tool.deptry]
-known_first_party = ["dspy_memory"]
+known_first_party = ["dspy_lancedb_memory"]
 
 [tool.poe.tasks]
 dev = "uv run example.py"

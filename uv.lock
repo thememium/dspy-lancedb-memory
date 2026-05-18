@@ -374,7 +374,7 @@ wheels = [
 ]
 
 [[package]]
-name = "dspy-memory"
+name = "dspy-lancedb-memory"
 version = "0.1.2"
 source = { editable = "." }
 dependencies = [
