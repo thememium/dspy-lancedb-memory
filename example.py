@@ -1,11 +1,11 @@
-"""Example usage of the dspy-memory SDK."""
+"""Example usage of the dspy-lancedb-memory SDK."""
 
 from __future__ import annotations
 
 import dspy
 from pydantic import BaseModel
 
-from dspy_memory import memory
+from dspy_lancedb_memory import memory
 
 # ===========================================================================
 # 1. Basic usage
