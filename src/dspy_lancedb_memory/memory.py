@@ -4,7 +4,7 @@ Usage
 -----
 ::
 
-    from dspy_memory import memory
+    from dspy_lancedb_memory import memory
     import dspy
 
     # 1. Configure once
@@ -29,16 +29,16 @@ from typing import Any
 import dspy
 from lancedb.rerankers import Reranker
 
-from dspy_memory.config import DEFAULT_EMBEDDING_MODEL
-from dspy_memory.config import configure as _configure
-from dspy_memory.config import (
+from dspy_lancedb_memory.config import DEFAULT_EMBEDDING_MODEL
+from dspy_lancedb_memory.config import configure as _configure
+from dspy_lancedb_memory.config import (
     get_embedding_config,
     get_reranker_lm_config,
     get_signature_config,
     get_store_config,
 )
-from dspy_memory.reranking import LiteLLMReranker
-from dspy_memory.store import LanceDSPyMemoryStore
+from dspy_lancedb_memory.reranking import LiteLLMReranker
+from dspy_lancedb_memory.store import LanceDSPyMemoryStore
 
 # ---------------------------------------------------------------------------
 # Sentinel to distinguish "not passed" from "explicitly None"

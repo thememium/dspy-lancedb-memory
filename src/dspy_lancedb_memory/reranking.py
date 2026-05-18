@@ -7,7 +7,7 @@ import pyarrow as pa
 from lancedb.rerankers import Reranker
 from litellm import rerank
 
-logger = logging.getLogger("dspy_memory")
+logger = logging.getLogger("dspy_lancedb_memory")
 
 
 class LiteLLMReranker(Reranker):

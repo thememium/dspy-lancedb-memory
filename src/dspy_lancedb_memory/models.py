@@ -55,7 +55,7 @@ class Memory(BaseModel):
 
     Use this in DSPy signatures via the ``Memories`` type alias::
 
-        from dspy_memory import Memories
+        from dspy_lancedb_memory import Memories
 
         class MySignature(dspy.Signature):
             memories: Memories = dspy.InputField(
