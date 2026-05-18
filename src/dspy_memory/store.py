@@ -11,10 +11,16 @@ import pyarrow as pa
 from lancedb.query import LanceVectorQueryBuilder
 from lancedb.rerankers import Reranker
 
-from .extraction import ExtractMemory, MemoryExtractor, MemoryReconciler
+from .extraction import (
+    ExtractMemory,
+    MemoryExtractor,
+    MemoryOperationExtractor,
+    MemoryReconciler,
+)
 from .models import (
     Memories,
     Memory,
+    MemoryOperation,
     MemoryType,
     ReconciledMemory,
     memory_type_from_string,
@@ -815,3 +821,146 @@ class LanceDSPyMemoryStore:
 
     def delete_memory(self, *, memory_id: str) -> None:
         self.table.delete(f"id = '{memory_id}'")
+
+    def delete_memories_by_search(
+        self,
+        *,
+        user_id: str,
+        query: str,
+        session_id: str = "",
+        conversation_id: str = "",
+        memory_type: MemoryType | str | None = None,
+        similarity_threshold: float = 0.85,
+        limit: int = 5,
+    ) -> Memories:
+        filters = self._build_filters(
+            user_id=user_id,
+            session_id=session_id,
+            conversation_id=conversation_id,
+            memory_type=self._memory_type_value(memory_type),
+        )
+
+        candidates = (
+            self.table.search(self._embed(query), vector_column_name="vector")
+            .where(" AND ".join(filters))
+            .limit(limit)
+            .to_list()
+        )
+
+        if not candidates:
+            return []
+
+        results = self._filter_by_relevance(candidates, min_score=similarity_threshold)
+
+        if not results:
+            return []
+
+        deleted = []
+        for row in results:
+            memory_id = str(row["id"])
+            self.table.delete(f"id = '{memory_id}'")
+            deleted.append(self._to_memory(dict(row)))
+
+        return deleted
+
+    def process_memories(
+        self,
+        *,
+        user_id: str,
+        contents: list[dict[str, str]] | None = None,
+        session_id: str = "",
+        conversation_id: str = "",
+        extract: bool = True,
+        metadata: dict[str, Any] | None = None,
+        similarity_threshold: float = 0.85,
+        use_reconciler: bool = True,
+    ) -> tuple[Memories, Memories]:
+        """Extract and process memory operations (create/update/delete) from a conversation.
+
+        Returns a tuple of (created_or_updated_memories, deleted_memories).
+        """
+        if not contents:
+            raise ValueError("contents is required")
+
+        if extract:
+            extractor = MemoryOperationExtractor()
+            operations = extractor(messages=contents)
+        else:
+            operations = [
+                MemoryOperation(
+                    action="create",
+                    content=c["content"],
+                )
+                for c in contents
+            ]
+
+        created_or_updated: list[Memory] = []
+        deleted: list[Memory] = []
+
+        for op in operations:
+            action = op.action.strip().lower()
+
+            if action == "delete":
+                search_query = op.search_query or op.content
+                if not search_query:
+                    continue
+
+                if op.content:
+                    exact_filters = self._build_filters(
+                        user_id=user_id,
+                        session_id=session_id,
+                        conversation_id=conversation_id,
+                        memory_type=self._memory_type_value(op.memory_type),
+                    )
+                    exact_results = (
+                        self.table.search()
+                        .where(
+                            " AND ".join(exact_filters)
+                            + f" AND content = '{op.content}'"
+                        )
+                        .limit(1)
+                        .to_list()
+                    )
+                    if exact_results:
+                        for row in exact_results:
+                            memory_id = str(row["id"])
+                            self.table.delete(f"id = '{memory_id}'")
+                            deleted.append(self._to_memory(dict(row)))
+                        continue
+
+                removed = self.delete_memories_by_search(
+                    user_id=user_id,
+                    query=search_query,
+                    session_id=session_id,
+                    conversation_id=conversation_id,
+                    memory_type=op.memory_type or None,
+                    similarity_threshold=similarity_threshold,
+                    limit=3,
+                )
+                deleted.extend(removed)
+
+            elif action == "update":
+                result = self.upsert_memory(
+                    user_id=user_id,
+                    content=op.content,
+                    session_id=session_id,
+                    conversation_id=conversation_id,
+                    memory_type=op.memory_type or MemoryType.SEMANTIC,
+                    metadata=metadata,
+                    similarity_threshold=similarity_threshold,
+                    use_reconciler=use_reconciler,
+                )
+                created_or_updated.append(result)
+
+            elif action == "create":
+                result = self.create_memory(
+                    user_id=user_id,
+                    content=op.content,
+                    session_id=session_id,
+                    conversation_id=conversation_id,
+                    memory_type=op.memory_type or MemoryType.SEMANTIC,
+                    metadata=metadata,
+                )
+                created_or_updated.append(result)
+
+        return (created_or_updated, deleted)
