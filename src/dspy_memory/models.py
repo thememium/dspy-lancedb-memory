@@ -94,27 +94,25 @@ class Memory(BaseModel):
     """ISO-8601 timestamp of last update."""
 
 
+class MemoryOperation(BaseModel):
+    action: str
+    content: str = ""
+    search_query: str = ""
+    memory_type: str = ""
+
+
+class MemoryOperations(BaseModel):
+    operations: list[MemoryOperation]
+
+
 class ReconciledMemory(BaseModel):
     """Decision returned by the memory reconciler when comparing a new
     extracted memory against existing stored memories."""
 
     action: str
-    """One of ``"keep"``, ``"update"``, or ``"create"``."""
-
     memory_id: str = ""
-    """The existing memory ``id`` if *action* is ``"keep"`` or ``"update"``."""
-
     final_content: str = ""
-    """
-    The content that should be stored.
-
-    * ``"keep"`` — same as the existing memory’s content.
-    * ``"update"`` — a synthesized combination of old + new information.
-    * ``"create"`` — the new memory’s content.
-    """
-
     final_type: str = ""
-    """Memory type string (same as ``new_memory_type`` for ``"create"``)."""
 
 
 Memories = list[Memory]
