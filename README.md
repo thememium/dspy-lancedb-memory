@@ -136,8 +136,8 @@ messages = [
     {
         "role": "user",
         "content": "I really like using DSPy signatures instead of writing prompts by hand. "
-                   "I'm working on a RAG pipeline for my thesis on climate modeling. "
-                   "The PR is at github.com/example/climate-rag/pull/42.",
+                   "I'm building a CLI tool to organize my digital bookmarks by topic. "
+                   "The PR is at github.com/example/bookmark-organizer/pull/42.",
     },
 ]
 
@@ -148,9 +148,9 @@ created = store.create_memories(
 )
 # Returns multiple MemoryItems categorized automatically:
 #   preference: "User prefers DSPy signatures over writing prompts by hand"
-#   semantic: "User is researching climate modeling for their thesis"
-#   procedural: "User is building a RAG pipeline"
-#   artifact: "github.com/example/climate-rag/pull/42"
+#   semantic: "User is building a CLI bookmark organizer"
+#   procedural: "User is organizing bookmarks by topic"
+#   artifact: "github.com/example/bookmark-organizer/pull/42"
 
 for m in created:
     print(f"[{m['memory_type']}] {m['content']}")
