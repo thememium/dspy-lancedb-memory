@@ -1,16 +1,32 @@
 # Changelog
 
+## v0.1.5 (2026-06-07)
+
+[Compare changes](https://github.com/thememium/dspy-lancedb-memory/compare/v0.1.4...v0.1.5)
+
+### ✅ Tests
+
+- add smoke test for package import and metadata ([483f704](https://github.com/thememium/dspy-lancedb-memory/commit/483f704c3e0d68c35cbe10f74eec238954fb2144))
+
+### 🤖 CI
+
+- **publish.yml**: add workflow to publish Python package on release ([b5ff782](https://github.com/thememium/dspy-lancedb-memory/commit/b5ff78214c46c05785feaf2dafc68f7e90e849c8))
+
+### Contributors
+
+- Edward Boswell <thememium@gmail.com>
+
 ## v0.1.4 (2026-06-07)
 
 [Compare changes](https://github.com/thememium/dspy-lancedb-memory/compare/v0.1.3...v0.1.4)
 
-### 📖 Documentation
+### ✅ Tests
 
-- **readme**: make examples provider‑agnostic and clarify env variables ([f73b66a](https://github.com/thememium/dspy-lancedb-memory/commit/f73b66a43f9b171f12c0f63fa365ca49309157e9))
+- add smoke test for package import and metadata ([483f704](https://github.com/thememium/dspy-lancedb-memory/commit/483f704c3e0d68c35cbe10f74eec238954fb2144))
 
-### 🏡 Chore
+### 🤖 CI
 
-- **pyproject.toml**: add metadata and URLs ([750673e](https://github.com/thememium/dspy-lancedb-memory/commit/750673ef39a7449feae9ec7706f7bcf784793e2e))
+- **publish.yml**: add workflow to publish Python package on release ([b5ff782](https://github.com/thememium/dspy-lancedb-memory/commit/b5ff78214c46c05785feaf2dafc68f7e90e849c8))
 
 ### Contributors
 
