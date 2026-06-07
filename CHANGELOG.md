@@ -1,5 +1,21 @@
 # Changelog
 
+## v0.1.4 (2026-06-07)
+
+[Compare changes](https://github.com/thememium/dspy-lancedb-memory/compare/v0.1.3...v0.1.4)
+
+### 📖 Documentation
+
+- **readme**: make examples provider‑agnostic and clarify env variables ([f73b66a](https://github.com/thememium/dspy-lancedb-memory/commit/f73b66a43f9b171f12c0f63fa365ca49309157e9))
+
+### 🏡 Chore
+
+- **pyproject.toml**: add metadata and URLs ([750673e](https://github.com/thememium/dspy-lancedb-memory/commit/750673ef39a7449feae9ec7706f7bcf784793e2e))
+
+### Contributors
+
+- Edward Boswell <thememium@gmail.com>
+
 ## v0.1.3 (2026-06-07)
 
 [Compare changes](https://github.com/thememium/dspy-lancedb-memory/compare/v0.1.2...v0.1.3)
