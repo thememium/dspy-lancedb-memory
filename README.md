@@ -42,7 +42,7 @@ DSPy Memory is a persistent vector memory store for DSPy-powered AI agents. It u
 - **Structured memory taxonomy** — Six memory categories (preference, semantic, episodic, procedural, summary, artifact) for fine-grained organization
 - **Persistent vector storage** — LanceDB-backed with automatic text embeddings via the DSPy `Embedder`
 - **Semantic search** — Query memories by user ID, session ID, conversation ID, memory type, or natural language
-- **Optional reranking** — ``LiteLLMReranker`` wraps ``litellm.rerank()`` for cross-encoder reranking via Cohere, Jina, OpenRouter, and more
+- **Optional reranking** — ``LiteLLMReranker`` wraps ``litellm.rerank()`` for cross-encoder reranking via Cohere, Jina, and any LiteLLM-compatible provider
 - **Full CRUD** — Create, search, update, and delete individual memories or batch-extract from conversations
 
 <p align="right">(<a href="#readme-top">back to top</a>)</p>
@@ -53,10 +53,21 @@ DSPy Memory is a persistent vector memory store for DSPy-powered AI agents. It u
 
 ### Prerequisites
 
-Set the `OPENROUTER_API_KEY` environment variable if you plan to use the OpenRouter reranker:
+Set the API key environment variable for your chosen provider. LiteLLM routes to the correct key automatically based on the model prefix:
 
 ```bash
-export OPENROUTER_API_KEY="sk-or-v1-..."
+# Examples — set whichever matches your provider
+export OPENAI_API_KEY="sk-..."
+export ANTHROPIC_API_KEY="sk-ant-..."
+export CO_API_KEY="..."            # Cohere reranker
+export JINA_API_KEY="..."          # Jina reranker
+```
+
+If you use a proxy or gateway (e.g. OpenRouter, LiteLLM proxy), set the base URL and key:
+
+```bash
+export OPENAI_API_BASE="https://openrouter.ai/api/v1"
+export OPENAI_API_KEY="sk-or-v1-..."
 ```
 
 ### Install
@@ -87,9 +98,9 @@ import dspy
 
 # Configure: extraction LM, embedding LM, and optional reranker LM
 memory.configure(
-    extraction_lm=dspy.LM("openrouter/openai/gpt-4o-mini"),
-    embedding_lm=dspy.LM("openrouter/openai/text-embedding-3-small"),
-    reranker_lm=dspy.LM("openrouter/cohere/rerank-4-fast"),   # optional — omit to disable
+    extraction_lm=dspy.LM("openai/gpt-4o-mini"),
+    embedding_lm=dspy.LM("openai/text-embedding-3-small"),
+    reranker_lm=dspy.LM("cohere/rerank-4-fast"),   # optional — omit to disable
 )
 
 # Create a store — picks up all defaults from configure()
@@ -129,7 +140,7 @@ The real power is automatic extraction. Pass a conversation turn and the LLM ext
 from dspy_lancedb_memory import memory
 import dspy
 
-memory.configure(extraction_lm=dspy.LM("openrouter/openai/gpt-4o-mini"))
+memory.configure(extraction_lm=dspy.LM("openai/gpt-4o-mini"))
 store = memory.Store()
 
 messages = [
@@ -163,8 +174,8 @@ from dspy_lancedb_memory import memory
 import dspy
 
 memory.configure(
-    extraction_lm=dspy.LM("openrouter/openai/gpt-4o-mini"),
-    reranker_lm=dspy.LM("openrouter/cohere/rerank-4-fast"),
+    extraction_lm=dspy.LM("openai/gpt-4o-mini"),
+    reranker_lm=dspy.LM("cohere/rerank-4-fast"),
 )
 store = memory.Store()
 
@@ -174,7 +185,7 @@ results = store.search_memories(
     query="What are Edward's tool preferences?",
     memory_type="preference",  # optional filter
     limit=5,
-    use_reranker=True,         # uses OpenRouter /rerank endpoint
+    use_reranker=True,         # uses configured reranker endpoint
 )
 ```
 
@@ -290,7 +301,7 @@ decision instead of a blind insert.
 from dspy_lancedb_memory import memory
 import dspy
 
-memory.configure(extraction_lm=dspy.LM("openrouter/openai/gpt-4o-mini"))
+memory.configure(extraction_lm=dspy.LM("openai/gpt-4o-mini"))
 store = memory.Store()
 
 messages = [
@@ -325,8 +336,8 @@ from dspy_lancedb_memory import memory
 import dspy
 
 memory.configure(
-    extraction_lm=dspy.LM("openrouter/openai/gpt-4o-mini"),
-    reranker_lm=dspy.LM("openrouter/cohere/rerank-4-fast"),
+    extraction_lm=dspy.LM("openai/gpt-4o-mini"),
+    reranker_lm=dspy.LM("cohere/rerank-4-fast"),
 )
 store = memory.Store()  # LiteLLMReranker auto-created from reranker_lm
 ```
@@ -351,23 +362,45 @@ reranker = LiteLLMReranker(
 store = memory.Store(reranker=reranker)
 ```
 
-For full control (custom column, top_n, etc.), build a ``LiteLLMReranker`` and pass it to ``Store()``:
+The model string uses the same ``provider/model`` format as ``dspy.LM`` — e.g.
+``"cohere/rerank-english-v3.0"``, ``"jina/jina-reranker-v2-base-multilingual"``.
+LiteLLM handles the routing.
+
+### Custom API Base and Key
+
+When running behind a proxy, gateway, or self-hosted endpoint, pass ``api_base`` and ``api_key`` directly to ``LiteLLMReranker``:
 
 ```python
 from dspy_lancedb_memory import LiteLLMReranker
 
 reranker = LiteLLMReranker(
-    model="cohere/rerank-english-v3.0",
-    column="content",               # LanceDB column to rerank against
-    top_n=20,                       # optional: limit reranked candidates
+    model="my-provider/rerank-model",
+    api_base="https://my-gateway.example.com/v1",
+    api_key="sk-my-secret",
+    column="content",
+    top_n=20,
 )
 
 store = memory.Store(reranker=reranker)
 ```
 
-The model string uses the same ``provider/model`` format as ``dspy.LM`` — e.g.
-``"cohere/rerank-english-v3.0"``, ``"openrouter/cohere/rerank-4-fast"``,
-``"jina/jina-reranker-v2-base-multilingual"``.  LiteLLM handles the routing.
+For embeddings behind a custom endpoint, pass the same ``api_base``/``api_key`` via a ``dspy.LM``:
+
+```python
+import dspy
+
+memory.configure(
+    embedding_lm=dspy.LM(
+        "openai/text-embedding-3-small",
+        api_base="https://my-gateway.example.com/v1",
+        api_key="sk-my-secret",
+    ),
+)
+```
+
+LiteLLM automatically routes to the correct provider based on the model prefix. If your
+provider is not in LiteLLM's built-in list, ``LiteLLMReranker`` falls back to calling a
+Cohere-compatible ``/rerank`` endpoint on your ``api_base``.
 
 ### Custom Configuration
 
@@ -378,10 +411,10 @@ from dspy_lancedb_memory import memory
 import dspy
 
 memory.configure(
-    extraction_lm=dspy.LM("openrouter/anthropic/claude-sonnet-4-20250514"),           # extraction LM
-    embedding_lm=dspy.LM("openrouter/openai/text-embedding-3-small"),              # embedding LM
+    extraction_lm=dspy.LM("anthropic/claude-sonnet-4-20250514"),           # extraction LM
+    embedding_lm=dspy.LM("openai/text-embedding-3-small"),              # embedding LM
     embedding_dim=1536,                                                             # must match
-    reranker_lm=dspy.LM("openrouter/cohere/rerank-4-fast"),                         # reranker model
+    reranker_lm=dspy.LM("cohere/rerank-4-fast"),                         # reranker model
     uri=".my_memories",                                                              # LanceDB path
     table_name="user_memories",                                                      # LanceDB table
 )
@@ -420,7 +453,7 @@ When storing directly (without extraction), the default type is `semantic`.
 |---|---|
 | [`memory`](#basic-usage) | SDK module — ``memory.configure()`` and ``memory.Store()`` |
 | [`MemoryExtractor`](#extract-memories-from-conversation) | DSPy `ChainOfThought` module for memory extraction |
-| [`LiteLLMReranker`](#using-the-reranker) | Cross-encoder reranker via ``litellm.rerank()`` — supports Cohere, Jina, OpenRouter, and more |
+| [`LiteLLMReranker`](#using-the-reranker) | Cross-encoder reranker via ``litellm.rerank()`` — supports Cohere, Jina, and any LiteLLM-compatible provider |
 | [`MemoryType`](#memory-taxonomy) | Enum of the six memory categories |
 | [`MemoryItem`](#extract-memories-from-conversation) | Pydantic model for extracted memories |
 | [`upsert_memory`](#upsert--insert-update-or-skip) | Semantic upsert — insert, update, or skip based on content similarity |
