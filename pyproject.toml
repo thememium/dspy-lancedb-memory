@@ -5,6 +5,15 @@ description = "Add your description here"
 readme = "README.md"
 authors = [{ name = "Edward Boswell", email = "thememium@gmail.com" }]
 requires-python = ">=3.12"
+keywords = ["dspy", "ai", "memory", "lancedb"]
+classifiers = [
+  "Operating System :: OS Independent",
+  "Development Status :: 3 - Alpha",
+  "Intended Audience :: Developers",
+  "Programming Language :: Python :: 3",
+  "Programming Language :: Python :: 3.12",
+  "Topic :: Software Development :: Libraries :: Python Modules",
+]
 dependencies = [
   "dspy>=3.2.0",
   "httpx>=0.28.1",
@@ -13,9 +22,15 @@ dependencies = [
   "pyarrow>=24.0.0",
   "pydantic>=2.13.3",
 ]
+license = "MIT"
+license-files = ["LICEN[CS]E*"]
 
-[project.scripts]
-dspy-lancedb-memory = "dspy_lancedb_memory:main"
+[project.urls]
+Homepage = "https://github.com/thememium/dspy-lancedb-memory"
+Documentation = "https://github.com/thememium/dspy-lancedb-memory"
+Repository = "https://github.com/thememium/dspy-lancedb-memory.git"
+Issues = "https://github.com/thememium/dspy-lancedb-memory/issues"
+Changelog = "https://github.com/thememium/dspy-lancedb-memory/blob/master/CHANGELOG.md"
 
 [build-system]
 requires = ["uv_build>=0.11.6,<0.12.0"]
@@ -31,6 +46,9 @@ dev = [
   "ty>=0.0.34",
   "usechange>=0.1.35",
 ]
+
+[tool.pytest.ini_options]
+filterwarnings = ["ignore:.*prefix.*:DeprecationWarning:dspy.*"]
 
 [tool.deptry]
 known_first_party = ["dspy_lancedb_memory"]
