@@ -188,9 +188,17 @@ def Store(
             model_str = (
                 reranker_lm.model if isinstance(reranker_lm, dspy.LM) else reranker_lm
             )
+            reranker_kwargs: dict = {}
+            if isinstance(reranker_lm, dspy.LM):
+                lm_kwargs: dict = getattr(reranker_lm, "kwargs", {})
+                if lm_kwargs.get("api_base"):
+                    reranker_kwargs["api_base"] = lm_kwargs["api_base"]
+                if lm_kwargs.get("api_key"):
+                    reranker_kwargs["api_key"] = lm_kwargs["api_key"]
             reranker = LiteLLMReranker(
                 model=model_str,
                 column="content",
+                **reranker_kwargs,
             )
         else:
             reranker = None
