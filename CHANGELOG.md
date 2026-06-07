@@ -1,5 +1,69 @@
 # Changelog
 
+## v0.1.3 (2026-06-07)
+
+[Compare changes](https://github.com/thememium/dspy-lancedb-memory/compare/v0.1.2...v0.1.3)
+
+### 🚀 Enhancements
+
+- **memory**: add api_base and api_key support to LiteLLMReranker ([5bdd33f](https://github.com/thememium/dspy-lancedb-memory/commit/5bdd33f971dbf007855064e2b43c839208cf4abc))
+- **reranking**: add custom API support and provider filtering for LiteLLM reranker ([db2f346](https://github.com/thememium/dspy-lancedb-memory/commit/db2f34699229d0a457d6474218f1a35ecae66814))
+- **dspy_lancedb_memory**: dynamic embed dim inference ([b085a9b](https://github.com/thememium/dspy-lancedb-memory/commit/b085a9bfda8fe478fd9f8d654c98f526234b9d4b))
+- **memory**: add DSPy Memory library with config, extraction, storage, reranker ([b0d2bb3](https://github.com/thememium/dspy-lancedb-memory/commit/b0d2bb3fc00631961624cfd4a396495d69491c69))
+- **example**: add deletion example to process_memories ([c757edc](https://github.com/thememium/dspy-lancedb-memory/commit/c757edc3d68672e944daa7a6d02fcb96ac746271))
+- **dspy_memory**: expose MemoryOperation API in __init__ ([04904db](https://github.com/thememium/dspy-lancedb-memory/commit/04904db0e5d28b092d197cbe31e62597927b60c3))
+- **dspy_memory**: add memory operation extraction ([49b7163](https://github.com/thememium/dspy-lancedb-memory/commit/49b71637f6a6a56d0c01e7e730d01b849a1ab606))
+- **models**: add MemoryOperation and MemoryOperations models ([a74624c](https://github.com/thememium/dspy-lancedb-memory/commit/a74624ca36063356f70cb0c279085f464b0076db))
+- **memory**: add delete_memories_by_search and process_memories to store ([784d87c](https://github.com/thememium/dspy-lancedb-memory/commit/784d87c79bc4befbbc0ad55f03f8620de1b4febc))
+- **store**: add relevance filtering to search_memories ([66f3bf7](https://github.com/thememium/dspy-lancedb-memory/commit/66f3bf791eff696550d3c87c7c497cb8fe098ba0))
+- **memory**: add relevance_score to Memory and update store conversion ([6a604d7](https://github.com/thememium/dspy-lancedb-memory/commit/6a604d70600e18cd105597819ee934ef20ce0b36))
+- **dspy_memory**: expose MemoryReconciler and ReconciledMemory ([97b5a3a](https://github.com/thememium/dspy-lancedb-memory/commit/97b5a3a4d95af1e64b8459946f3dead7ce663df6))
+- **dspy_memory**: add reconciler support ([5ececa5](https://github.com/thememium/dspy-lancedb-memory/commit/5ececa54447ccaf69d89607b396aed0bd54362c8))
+- **models**: add ReconciledMemory model ([fb2d8a7](https://github.com/thememium/dspy-lancedb-memory/commit/fb2d8a73ca763cfb9bbf7a1e4f8c4535a09c2dbe))
+- **memory**: add ReconcileMemory and MemoryReconciler for deduplication and update logic ([7d14b8a](https://github.com/thememium/dspy-lancedb-memory/commit/7d14b8a778de0ed761163dfa66ed8c896c4843ca))
+- **memory**: add semantic upsert operations and API refinements ([f64b2bc](https://github.com/thememium/dspy-lancedb-memory/commit/f64b2bc7bd106e772ca9686bd0ce61289b66e852))
+
+### 🩹 Fixes
+
+- **memory-store**: set default minRelevanceScore and simplify fetch logic ([862a008](https://github.com/thememium/dspy-lancedb-memory/commit/862a0080a73049b64cb102b3471d123c65d76256))
+
+### 💅 Refactors
+
+- **dspy_lancedb_memory/config.py**: allow optional embedding dimension in config ([2511006](https://github.com/thememium/dspy-lancedb-memory/commit/2511006e6bf121c90298791182cc518b5dbbcc97))
+- **example**: update example to use dspy-lancedb-memory SDK ([5743fc0](https://github.com/thememium/dspy-lancedb-memory/commit/5743fc0704204bbc26463e3e1886255f972690f8))
+- **pyproject.toml**: rename package to dspy-lancedb-memory and update script names ([4544278](https://github.com/thememium/dspy-lancedb-memory/commit/45442783986fe8a5d0288c8366e7cfc6478d360d))
+- **test**: update imports to dspy_lancedb_memory ([438a1e1](https://github.com/thememium/dspy-lancedb-memory/commit/438a1e1b01c56b22dbb305d54f194297296a3f61))
+- **dspy_memory/store**: add semantic upsert deduplication and filtering logic ([22a92d9](https://github.com/thememium/dspy-lancedb-memory/commit/22a92d9fba99117863862ac08796bf1c5c3828a9))
+
+### 📖 Documentation
+
+- **readme**: update example scenario to bookmark organizer ([e828b66](https://github.com/thememium/dspy-lancedb-memory/commit/e828b665de76f8754f86e09903671caa26d44948))
+- add bug report issue template ([1d16b11](https://github.com/thememium/dspy-lancedb-memory/commit/1d16b11b586e7520ffd217141ca28dab8c473466))
+- add contributing guide for new contributors ([15a19c1](https://github.com/thememium/dspy-lancedb-memory/commit/15a19c121e48cfe4f11b15c121d6b90af284fe66))
+- add MIT license file ([16bc017](https://github.com/thememium/dspy-lancedb-memory/commit/16bc0173f3ef8466bcc080631ef27714578d73ab))
+- add SECURITY.md for vulnerability reporting and security guidelines ([c2ca4e6](https://github.com/thememium/dspy-lancedb-memory/commit/c2ca4e6e87d78101cd263bca78d064200025b223))
+- **README**: rename dspy‑memory to dspy‑lancedb‑memory in docs ([dc6cb14](https://github.com/thememium/dspy-lancedb-memory/commit/dc6cb1440a20ac4ac1a52c56cc58a624f1bb8b37))
+- **readme**: fix table separator line to match column count ([342d00a](https://github.com/thememium/dspy-lancedb-memory/commit/342d00ad34b0efc180d33326db3b5cbc6709846a))
+
+### 🏡 Chore
+
+- **deps**: bump usechange from 0.1.28 to 0.1.35 ([1c1f417](https://github.com/thememium/dspy-lancedb-memory/commit/1c1f4177610c57cfac39243314ffcef72b1ac0ca))
+- **.gitignore**: add .omo to ignore ([3d4efaf](https://github.com/thememium/dspy-lancedb-memory/commit/3d4efafb67fa5fbfb789bb604b0566bb30564b01))
+
+### ✅ Tests
+
+- add comprehensive tests for memory operation processing ([e5c894e](https://github.com/thememium/dspy-lancedb-memory/commit/e5c894ebbb2f0586cc31f632dd885416f14e5efe))
+- add reconciler integration tests and deterministic stub ([bb6dbdd](https://github.com/thememium/dspy-lancedb-memory/commit/bb6dbddd2000139536a9d911426538f91c739bce))
+
+### Other Changes
+
+- Merge pull request #2 from thememium/eboswell/feat/variable-dim-size-and-local-models (#2) ([d79f8ab](https://github.com/thememium/dspy-lancedb-memory/commit/d79f8ab23451d4401e61d1c6c8292ec043de02c7))
+- Merge pull request #1 from thememium/eboswell/feat/add-extract-operation-with-delete (#1) ([531264c](https://github.com/thememium/dspy-lancedb-memory/commit/531264c9fe040728ffd37867ccaeca82f4bec928))
+
+### Contributors
+
+- Edward Boswell <thememium@gmail.com>
+
 ## v0.1.2 (2026-05-05)
 
 [Compare changes](https://github.com/thememium/dspy-memory/compare/v0.1.1...v0.1.2)
