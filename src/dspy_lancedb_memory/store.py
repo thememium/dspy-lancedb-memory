@@ -1,4 +1,5 @@
 import json
+import logging
 import re
 import uuid
 from datetime import datetime, timezone
@@ -26,6 +27,8 @@ from .models import (
     memory_type_from_string,
 )
 
+logger = logging.getLogger("dspy_lancedb_memory")
+
 _SEMANTIC_DUPLICATE_STOPWORDS = frozenset(
     {"a", "an", "the", "their", "his", "her", "our", "my", "your"}
 )
@@ -39,7 +42,7 @@ class LanceDSPyMemoryStore:
         uri: str = ".lancedb",
         table_name: str = "memories",
         embedding_lm=None,
-        embedding_dim: int = 1536,
+        embedding_dim: int | None = None,
         signature=None,
         reranker: Reranker | None = None,
         rerank_limit_multiplier: int = 10,
@@ -51,12 +54,30 @@ class LanceDSPyMemoryStore:
 
         if embedding_lm is None:
             embedding_lm = dspy.LM("openrouter/openai/text-embedding-3-small")
+        lm_kwargs: dict = getattr(embedding_lm, "kwargs", {})
+        embedder_kwargs: dict = {}
+        if lm_kwargs.get("api_base"):
+            embedder_kwargs["api_base"] = lm_kwargs["api_base"]
+        if lm_kwargs.get("api_key"):
+            embedder_kwargs["api_key"] = lm_kwargs["api_key"]
+        # When api_base is set the target is an OpenAI-compatible server,
+        # so force the ``openai/`` provider prefix regardless of the original
+        # model string (e.g. ``huggingface/…``).  LiteLLM's HuggingFace
+        # handler builds a provider-specific URL that 404s on custom servers.
+        embedder_model = embedding_lm.model
+        if "api_base" in embedder_kwargs and "/" in embedder_model:
+            embedder_model = "openai/" + embedder_model.split("/", 1)[1]
+            embedder_kwargs["encoding_format"] = "float"
         self.embedder = dspy.Embedder(
-            embedding_lm.model,
+            embedder_model,
             caching=True,
+            **embedder_kwargs,
         )
         self.reranker = reranker
         self._extraction_signature = signature or ExtractMemory
+
+        if self.embedding_dim is None:
+            self.embedding_dim = self._infer_embedding_dim()
 
         self.table = self._get_or_create_table()
 
@@ -67,6 +88,26 @@ class LanceDSPyMemoryStore:
 
     def _embed_many(self, texts: list[str]) -> list[list[float]]:
         return [[float(v) for v in row] for row in self.embedder(texts)]
+
+    def _infer_embedding_dim(self) -> int:
+        if self.table_name in self.db.table_names():
+            table = self.db.open_table(self.table_name)
+            dim = self._get_vector_dim(table)
+            if dim is not None:
+                return dim
+        vec = self._embed("__dimension_probe__")
+        return len(vec)
+
+    @staticmethod
+    def _get_vector_dim(table) -> int | None:
+        for field in table.schema:
+            if field.name == "vector":
+                ft = field.type
+                if isinstance(ft, pa.FixedSizeListType):
+                    return ft.list_size
+                if isinstance(ft, pa.ListType):
+                    return None
+        return None
 
     @staticmethod
     def _memory_type_value(memory_type: MemoryType | str | None) -> str | None:
@@ -184,8 +225,23 @@ class LanceDSPyMemoryStore:
         return "update" if new_is_richer or same_slot_replacement else "skip"
 
     def _get_or_create_table(self):
+        assert self.embedding_dim is not None, (
+            "embedding_dim must be set before creating table"
+        )
         if self.table_name in self.db.table_names():
-            return self.db.open_table(self.table_name)
+            table = self.db.open_table(self.table_name)
+            existing_dim = self._get_vector_dim(table)
+            if existing_dim is not None and existing_dim != self.embedding_dim:
+                logger.warning(
+                    "Table %r vector dimension (%d) does not match embedding_dim (%d); "
+                    "dropping and recreating.",
+                    self.table_name,
+                    existing_dim,
+                    self.embedding_dim,
+                )
+                self.db.drop_table(self.table_name)
+            else:
+                return table
 
         schema = pa.schema(
             [
