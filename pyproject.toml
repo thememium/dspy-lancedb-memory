@@ -29,7 +29,7 @@ dev = [
   "pytest>=9.0.3",
   "ruff>=0.15.12",
   "ty>=0.0.34",
-  "usechange>=0.1.28",
+  "usechange>=0.1.35",
 ]
 
 [tool.deptry]
