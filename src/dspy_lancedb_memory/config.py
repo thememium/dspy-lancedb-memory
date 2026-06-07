@@ -20,7 +20,7 @@ DEFAULT_TABLE_NAME = "memories"
 
 _lm: dspy.LM | None = None
 _embedding_lm: dspy.LM | None = None
-_embedding_dim: int = DEFAULT_EMBEDDING_DIM
+_embedding_dim: int | None = None
 _uri: str = DEFAULT_URI
 _table_name: str = DEFAULT_TABLE_NAME
 _reranker_lm: dspy.LM | str | None = None
@@ -120,7 +120,7 @@ def get_configured() -> bool:
     return _configured
 
 
-def get_embedding_config() -> tuple[dspy.LM | None, int]:
+def get_embedding_config() -> tuple[dspy.LM | None, int | None]:
     return _embedding_lm, _embedding_dim
 
 
