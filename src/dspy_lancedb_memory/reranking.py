@@ -10,6 +10,22 @@ from litellm import rerank
 logger = logging.getLogger("dspy_lancedb_memory")
 
 
+_LITELLM_RERANK_PROVIDERS = frozenset(
+    {
+        "cohere",
+        "together_ai",
+        "azure_ai",
+        "infinity",
+        "litellm_proxy",
+        "hosted_vllm",
+        "deepinfra",
+        "fireworks_ai",
+        "voyage",
+        "watsonx",
+    }
+)
+
+
 class LiteLLMReranker(Reranker):
     """Reranker that uses ``litellm.rerank()`` for cross-encoder reranking.
 
@@ -27,11 +43,15 @@ class LiteLLMReranker(Reranker):
         column: str = "text",
         top_n: int | None = None,
         return_score: str = "relevance",
+        api_base: str | None = None,
+        api_key: str | None = None,
     ):
         super().__init__(return_score)
         self.model = model
         self.column = column
         self.top_n = top_n
+        self.api_base = api_base
+        self.api_key = api_key
 
     # ------------------------------------------------------------------
     # Internal helpers
@@ -45,15 +65,27 @@ class LiteLLMReranker(Reranker):
         docs = result_set[self.column].to_pylist()
 
         try:
+            provider = self.model.split("/", 1)[0] if "/" in self.model else "openai"
+            use_litellm = self.model.startswith("openrouter/") is False and (
+                not self.api_base or provider in _LITELLM_RERANK_PROVIDERS
+            )
             if self.model.startswith("openrouter/"):
                 response = self._rerank_openrouter(query, docs)
-            else:
+            elif use_litellm:
+                rerank_kwargs: dict = {}
+                if self.api_base:
+                    rerank_kwargs["api_base"] = self.api_base
+                if self.api_key:
+                    rerank_kwargs["api_key"] = self.api_key
                 response: Any = rerank(
                     model=self.model,
                     query=query,
                     documents=docs,
                     top_n=self.top_n,
+                    **rerank_kwargs,
                 )
+            else:
+                response = self._rerank_custom_api(query, docs)
         except Exception as exc:
             logger.warning(
                 "Reranker call failed (%s); returning original results.",
@@ -92,6 +124,32 @@ class LiteLLMReranker(Reranker):
                 "Authorization": f"Bearer {api_key}",
                 "Content-Type": "application/json",
             },
+            json=payload,
+            timeout=60.0,
+        )
+        response.raise_for_status()
+        return response.json()
+
+    def _rerank_custom_api(self, query: str, docs: list[str]) -> dict[str, Any]:
+        """Call a Cohere-compatible /rerank endpoint on a custom server."""
+        # Strip provider prefix (e.g. "huggingface/model" → "model").
+        model_name = self.model.split("/", 1)[1] if "/" in self.model else self.model
+        payload: dict[str, Any] = {
+            "model": model_name,
+            "query": query,
+            "documents": docs,
+        }
+        if self.top_n is not None:
+            payload["top_n"] = self.top_n
+
+        headers: dict[str, str] = {"Content-Type": "application/json"}
+        if self.api_key:
+            headers["Authorization"] = f"Bearer {self.api_key}"
+
+        base = (self.api_base or "").rstrip("/")
+        response = httpx.post(
+            f"{base}/rerank",
+            headers=headers,
             json=payload,
             timeout=60.0,
         )
