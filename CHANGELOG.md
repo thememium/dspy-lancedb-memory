@@ -1,5 +1,26 @@
 # Changelog
 
+## v0.1.7 (2026-06-14)
+
+[Compare changes](https://github.com/thememium/dspy-lancedb-memory/compare/v0.1.6...v0.1.7)
+
+### 🚀 Enhancements
+
+- add replaces_id and is_active to Memory model for versioning ([127d322](https://github.com/thememium/dspy-lancedb-memory/commit/127d3229d739678db47e393858fb23ff113b0174))
+
+### 💅 Refactors
+
+- **dspylance**: implement append‑only memory semantics ([13faaa2](https://github.com/thememium/dspy-lancedb-memory/commit/13faaa2b78498ca52fab8d9ba6e3d670eb595509))
+- **example.py**: move scratch store to hidden .lancedb directory ([570868b](https://github.com/thememium/dspy-lancedb-memory/commit/570868b16f598ec28483ade4d2d6a0b2b9d59f8a))
+
+### Other Changes
+
+- Merge pull request #3 from thememium/eboswell/refactor/append-only-memory-soft-deletes (#3) ([7562d58](https://github.com/thememium/dspy-lancedb-memory/commit/7562d58b124e5631a2a12aae65817a43986fdfdc))
+
+### Contributors
+
+- Edward Boswell <thememium@gmail.com>
+
 ## v0.1.6 (2026-06-14)
 
 [Compare changes](https://github.com/thememium/dspy-lancedb-memory/compare/v0.1.5...v0.1.6)
