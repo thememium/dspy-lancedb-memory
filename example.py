@@ -171,7 +171,7 @@ print(f"Combined filter: {len(combined)} result(s)")
 
 # Override individual fields without affecting other stores:
 scratch = memory.Store(
-    uri="./scratch",
+    uri="./.lancedb/scratch",
     reranker=None,  # disable reranking for this store
     table_name="scratchpad",
 )
