@@ -1,5 +1,22 @@
 # Changelog
 
+## v0.1.6 (2026-06-14)
+
+[Compare changes](https://github.com/thememium/dspy-lancedb-memory/compare/v0.1.5...v0.1.6)
+
+### 💅 Refactors
+
+- **memory extraction**: change forward methods to return dspy.Prediction ([0f466f7](https://github.com/thememium/dspy-lancedb-memory/commit/0f466f761bb7349df1ceb66d3939351140748bc9))
+- **dspy**: adapt to new Prediction API in LanceDSPyMemoryStore ([a5add4f](https://github.com/thememium/dspy-lancedb-memory/commit/a5add4f6232d8cb32486fe6fa6264633d43bc839))
+
+### 🏡 Chore
+
+- **deps**: bump usechange to 0.1.43 ([03f845d](https://github.com/thememium/dspy-lancedb-memory/commit/03f845dd08904a1bed187a92469cea0ef8be0770))
+
+### Contributors
+
+- Edward Boswell <thememium@gmail.com>
+
 ## v0.1.5 (2026-06-07)
 
 [Compare changes](https://github.com/thememium/dspy-lancedb-memory/compare/v0.1.4...v0.1.5)
