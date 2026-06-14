@@ -50,7 +50,7 @@ class MemoryOperationExtractor(dspy.Module):
         super().__init__()
         self.extract = dspy.ChainOfThought(signature)
 
-    def forward(self, messages: list[dict[str, str]]) -> list[MemoryOperation]:
+    def forward(self, messages: list[dict[str, str]]) -> dspy.Prediction:
         prediction: dspy.Prediction = self.extract(messages=messages)
         ops: list[MemoryOperation] = prediction.operations
         if not isinstance(ops, list):
@@ -64,7 +64,7 @@ class MemoryOperationExtractor(dspy.Module):
             op.action = action
             cleaned.append(op)
 
-        return cleaned
+        return dspy.Prediction(operations=cleaned)
 
 
 class ExtractMemory(dspy.Signature):
@@ -107,9 +107,7 @@ class MemoryExtractor(dspy.Module):
         super().__init__()
         self.extract = dspy.ChainOfThought(signature)
 
-    def forward(
-        self, messages: list[dict[str, str]]
-    ) -> list[tuple[str, MemoryType | str]]:
+    def forward(self, messages: list[dict[str, str]]) -> dspy.Prediction:
         prediction: dspy.Prediction = self.extract(messages=messages)
         items: list[MemoryItem] = prediction.memories
         if not isinstance(items, list):
@@ -122,7 +120,7 @@ class MemoryExtractor(dspy.Module):
                 continue
             cleaned.append((content, memory_type_from_string(item.type)))
 
-        return cleaned
+        return dspy.Prediction(memories=cleaned)
 
 
 class ReconcileMemory(dspy.Signature):
@@ -184,7 +182,7 @@ class MemoryReconciler(dspy.Module):
         new_memory_content: str,
         new_memory_type: str,
         existing_memories: list[dict],
-    ) -> ReconciledMemory:
+    ) -> dspy.Prediction:
         prediction: dspy.Prediction = self.reconcile(
             new_memory_content=new_memory_content,
             new_memory_type=new_memory_type,
@@ -192,7 +190,6 @@ class MemoryReconciler(dspy.Module):
         )
         reconciled: ReconciledMemory = prediction.reconciled
 
-        # Normalize and guard the action field
         action = reconciled.action.strip().lower()
         if action.startswith("keep"):
             action = "keep"
@@ -201,18 +198,14 @@ class MemoryReconciler(dspy.Module):
         elif action.startswith("create"):
             action = "create"
         else:
-            # Fallback — if the LLM is uncertain, default to create so we
-            # never silently discard novel information.
             action = "create"
 
         reconciled.action = action
 
-        # Ensure memory_id is set for keep / update actions
         if action in ("keep", "update") and not reconciled.memory_id:
             if existing_memories:
                 reconciled.memory_id = str(existing_memories[0]["id"])
 
-        # Ensure final_content is set
         if not reconciled.final_content:
             if action == "create":
                 reconciled.final_content = new_memory_content
@@ -221,7 +214,6 @@ class MemoryReconciler(dspy.Module):
             else:
                 reconciled.final_content = new_memory_content
 
-        # Ensure final_type is set
         if not reconciled.final_type:
             reconciled.final_type = (
                 new_memory_type
@@ -231,4 +223,4 @@ class MemoryReconciler(dspy.Module):
                 else new_memory_type
             )
 
-        return reconciled
+        return dspy.Prediction(reconciled=reconciled)

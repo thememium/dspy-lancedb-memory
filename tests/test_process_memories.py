@@ -2,6 +2,7 @@ from __future__ import annotations
 
 from types import SimpleNamespace
 
+import dspy
 import pytest
 
 from dspy_lancedb_memory.models import MemoryOperation
@@ -96,13 +97,15 @@ def test_process_memories_updates_when_extract_returns_update(store, monkeypatch
 
     monkeypatch.setattr(
         "dspy_lancedb_memory.store.MemoryOperationExtractor.forward",
-        lambda self, messages: [
-            MemoryOperation(
-                action="update",
-                content="name is Edward Boswell",
-                memory_type="semantic",
-            )
-        ],
+        lambda self, messages: dspy.Prediction(
+            operations=[
+                MemoryOperation(
+                    action="update",
+                    content="name is Edward Boswell",
+                    memory_type="semantic",
+                )
+            ]
+        ),
     )
 
     created, deleted = store.process_memories(
@@ -128,12 +131,14 @@ def test_process_memories_deletes_when_extract_returns_delete(store, monkeypatch
 
     monkeypatch.setattr(
         "dspy_lancedb_memory.store.MemoryOperationExtractor.forward",
-        lambda self, messages: [
-            MemoryOperation(
-                action="delete",
-                search_query="pizza memory",
-            )
-        ],
+        lambda self, messages: dspy.Prediction(
+            operations=[
+                MemoryOperation(
+                    action="delete",
+                    search_query="pizza memory",
+                )
+            ]
+        ),
     )
 
     created, deleted = store.process_memories(
@@ -152,13 +157,15 @@ def test_process_memories_deletes_when_extract_returns_delete(store, monkeypatch
 def test_process_memories_creates_when_extract_returns_create(store, monkeypatch):
     monkeypatch.setattr(
         "dspy_lancedb_memory.store.MemoryOperationExtractor.forward",
-        lambda self, messages: [
-            MemoryOperation(
-                action="create",
-                content="favorite color is blue",
-                memory_type="semantic",
-            )
-        ],
+        lambda self, messages: dspy.Prediction(
+            operations=[
+                MemoryOperation(
+                    action="create",
+                    content="favorite color is blue",
+                    memory_type="semantic",
+                )
+            ]
+        ),
     )
 
     created, deleted = store.process_memories(
@@ -191,12 +198,14 @@ def test_process_memories_verbatim_non_extract_creates(store):
 def test_process_memories_skips_invalid_actions(store, monkeypatch):
     monkeypatch.setattr(
         "dspy_lancedb_memory.store.MemoryOperationExtractor.forward",
-        lambda self, messages: [
-            MemoryOperation(
-                action="invalid",
-                content="some content",
-            )
-        ],
+        lambda self, messages: dspy.Prediction(
+            operations=[
+                MemoryOperation(
+                    action="invalid",
+                    content="some content",
+                )
+            ]
+        ),
     )
 
     created, deleted = store.process_memories(
@@ -219,12 +228,14 @@ def test_process_memories_delete_with_exact_match(store, monkeypatch):
 
     monkeypatch.setattr(
         "dspy_lancedb_memory.store.MemoryOperationExtractor.forward",
-        lambda self, messages: [
-            MemoryOperation(
-                action="delete",
-                content="favorite food is pizza",
-            )
-        ],
+        lambda self, messages: dspy.Prediction(
+            operations=[
+                MemoryOperation(
+                    action="delete",
+                    content="favorite food is pizza",
+                )
+            ]
+        ),
     )
 
     created, deleted = store.process_memories(
@@ -248,17 +259,19 @@ def test_process_memories_multiple_operations(store, monkeypatch):
 
     monkeypatch.setattr(
         "dspy_lancedb_memory.store.MemoryOperationExtractor.forward",
-        lambda self, messages: [
-            MemoryOperation(
-                action="delete",
-                search_query="old fact",
-            ),
-            MemoryOperation(
-                action="create",
-                content="new fact to remember",
-                memory_type="semantic",
-            ),
-        ],
+        lambda self, messages: dspy.Prediction(
+            operations=[
+                MemoryOperation(
+                    action="delete",
+                    search_query="old fact",
+                ),
+                MemoryOperation(
+                    action="create",
+                    content="new fact to remember",
+                    memory_type="semantic",
+                ),
+            ]
+        ),
     )
 
     created, deleted = store.process_memories(
