@@ -388,7 +388,7 @@ class LanceDSPyMemoryStore:
             extractor = MemoryExtractor(signature=self._extraction_signature)
             extracted = cast(
                 list[tuple[str, MemoryType | str]],
-                extractor(messages=contents),
+                extractor(messages=contents).memories,
             )
 
             stored = [
@@ -581,7 +581,7 @@ class LanceDSPyMemoryStore:
             extractor = MemoryExtractor(signature=self._extraction_signature)
             extracted = cast(
                 list[tuple[str, MemoryType | str]],
-                extractor(messages=contents),
+                extractor(messages=contents).memories,
             )
 
             if use_reconciler:
@@ -628,7 +628,7 @@ class LanceDSPyMemoryStore:
                             new_memory_content=content,
                             new_memory_type=str(memory_type_str),
                             existing_memories=existing_list,
-                        )
+                        ).reconciled
                     else:
                         decision = ReconciledMemory(
                             action="create",
@@ -801,7 +801,7 @@ class LanceDSPyMemoryStore:
                         new_memory_content=content,
                         new_memory_type=str(resolved_type),
                         existing_memories=existing_list,
-                    )
+                    ).reconciled
 
                     if decision.action == "keep":
                         kept = (
@@ -940,7 +940,7 @@ class LanceDSPyMemoryStore:
 
         if extract:
             extractor = MemoryOperationExtractor()
-            operations = extractor(messages=contents)
+            operations = extractor(messages=contents).operations
         else:
             operations = [
                 MemoryOperation(

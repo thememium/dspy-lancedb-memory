@@ -2,6 +2,7 @@ from __future__ import annotations
 
 from types import SimpleNamespace
 
+import dspy
 import pytest
 
 from dspy_lancedb_memory.store import LanceDSPyMemoryStore
@@ -181,7 +182,9 @@ def test_upsert_memories_extract_path_reuses_semantic_upsert_decision(
 
     monkeypatch.setattr(
         "dspy_lancedb_memory.store.MemoryExtractor.forward",
-        lambda self, messages: [("favorite food is pepperoni pizza", "semantic")],
+        lambda self, messages: dspy.Prediction(
+            memories=[("favorite food is pepperoni pizza", "semantic")]
+        ),
     )
 
     result = store.upsert_memories(
@@ -207,7 +210,9 @@ def test_extract_paths_call_memory_extractor_module_instead_of_forward(
             self.signature = signature
 
         def __call__(self, *, messages):
-            return [("favorite programming language is python", "semantic")]
+            return dspy.Prediction(
+                memories=[("favorite programming language is python", "semantic")]
+            )
 
         def forward(self, messages):
             raise AssertionError("forward() should not be called directly")
@@ -246,24 +251,30 @@ class StubReconciler:
 
         for existing in existing_memories:
             if existing["content"] == new_memory_content:
-                return ReconciledMemory(
-                    action="keep",
-                    memory_id=existing["id"],
-                    final_content=existing["content"],
-                    final_type=existing["type"],
+                return dspy.Prediction(
+                    reconciled=ReconciledMemory(
+                        action="keep",
+                        memory_id=existing["id"],
+                        final_content=existing["content"],
+                        final_type=existing["type"],
+                    )
                 )
             if new_memory_content.startswith(existing["content"] + " "):
-                return ReconciledMemory(
-                    action="update",
-                    memory_id=existing["id"],
-                    final_content=new_memory_content,
-                    final_type=existing["type"],
+                return dspy.Prediction(
+                    reconciled=ReconciledMemory(
+                        action="update",
+                        memory_id=existing["id"],
+                        final_content=new_memory_content,
+                        final_type=existing["type"],
+                    )
                 )
-        return ReconciledMemory(
-            action="create",
-            memory_id="",
-            final_content=new_memory_content,
-            final_type=new_memory_type,
+        return dspy.Prediction(
+            reconciled=ReconciledMemory(
+                action="create",
+                memory_id="",
+                final_content=new_memory_content,
+                final_type=new_memory_type,
+            )
         )
 
 
@@ -335,7 +346,9 @@ def test_reconciler_extract_path_consolidates_name(store, monkeypatch):
 
     monkeypatch.setattr(
         "dspy_lancedb_memory.store.MemoryExtractor.forward",
-        lambda self, messages: [("name is Edward Boswell", "semantic")],
+        lambda self, messages: dspy.Prediction(
+            memories=[("name is Edward Boswell", "semantic")]
+        ),
     )
     monkeypatch.setattr("dspy_lancedb_memory.store.MemoryReconciler", StubReconciler)
 
