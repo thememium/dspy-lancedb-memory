@@ -166,6 +166,8 @@ class LanceDSPyMemoryStore:
         if memory_type:
             filters.append(f"memory_type = '{memory_type}'")
 
+        filters.append("is_active = true")
+
         return filters
 
     @classmethod
@@ -254,6 +256,8 @@ class LanceDSPyMemoryStore:
                 pa.field("metadata", pa.string()),  # JSON-encoded dict
                 pa.field("created_at", pa.string()),
                 pa.field("updated_at", pa.string()),
+                pa.field("replaces_id", pa.utf8(), nullable=True),
+                pa.field("is_active", pa.bool_()),
                 pa.field("vector", pa.list_(pa.float32(), self.embedding_dim)),
             ]
         )
@@ -271,6 +275,8 @@ class LanceDSPyMemoryStore:
                     "metadata": "{}",
                     "created_at": datetime.now(timezone.utc).isoformat(),
                     "updated_at": datetime.now(timezone.utc).isoformat(),
+                    "replaces_id": None,
+                    "is_active": True,
                     "vector": [0.0] * self.embedding_dim,
                 }
             ],
@@ -305,6 +311,8 @@ class LanceDSPyMemoryStore:
             "metadata": json.dumps(metadata or {}),
             "created_at": now,
             "updated_at": now,
+            "replaces_id": None,
+            "is_active": True,
             "vector": self._embed(content),
         }
 
@@ -510,12 +518,30 @@ class LanceDSPyMemoryStore:
         old = self.table.search().where(f"id = '{memory_id}'").to_list()
         if not old:
             return
-        row = dict(old[0])
-        row["content"] = content
-        row["updated_at"] = datetime.now(timezone.utc).isoformat()
-        row["vector"] = self._embed(content)
-        self.table.delete(f"id = '{memory_id}'")
-        self.table.add([row])
+        old_record = old[0]
+        if not old_record.get("is_active", True):
+            logger.warning(
+                "update_memory called on inactive record %s — skipping", memory_id
+            )
+            return
+
+        new_row = self._build_memory_row(
+            user_id=old_record["user_id"],
+            content=content,
+            session_id=old_record.get("session_id", ""),
+            conversation_id=old_record.get("conversation_id", ""),
+            memory_type=old_record.get("memory_type", "semantic"),
+            metadata=json.loads(old_record.get("metadata", "{}"))
+            if isinstance(old_record.get("metadata"), str)
+            else old_record.get("metadata"),
+        )
+        new_row["replaces_id"] = memory_id
+
+        self.table.add([new_row])
+        self.table.update(
+            where=f"id = '{memory_id}'",
+            values={"is_active": False},
+        )
 
     def upsert_memories(
         self,
@@ -652,7 +678,7 @@ class LanceDSPyMemoryStore:
                         )
                         updated = (
                             self.table.search()
-                            .where(f"id = '{decision.memory_id}'")
+                            .where(f"replaces_id = '{decision.memory_id}'")
                             .to_list()
                         )
                         if updated:
@@ -818,7 +844,7 @@ class LanceDSPyMemoryStore:
                         )
                         updated = (
                             self.table.search()
-                            .where(f"id = '{decision.memory_id}'")
+                            .where(f"replaces_id = '{decision.memory_id}'")
                             .to_list()
                         )
                         if updated:
@@ -840,7 +866,7 @@ class LanceDSPyMemoryStore:
                             )
                             updated = (
                                 self.table.search()
-                                .where(f"id = '{existing['id']}'")
+                                .where(f"replaces_id = '{existing['id']}'")
                                 .to_list()
                             )
                             return self._without_vectors([dict(updated[0])])[0]
@@ -857,7 +883,9 @@ class LanceDSPyMemoryStore:
                 if cosine_sim >= similarity_threshold:
                     self.update_memory(memory_id=str(existing["id"]), content=content)
                     updated = (
-                        self.table.search().where(f"id = '{existing['id']}'").to_list()
+                        self.table.search()
+                        .where(f"replaces_id = '{existing['id']}'")
+                        .to_list()
                     )
                     return self._without_vectors([dict(updated[0])])[0]
 
@@ -876,7 +904,7 @@ class LanceDSPyMemoryStore:
         )[0]
 
     def delete_memory(self, *, memory_id: str) -> None:
-        self.table.delete(f"id = '{memory_id}'")
+        self.table.update(where=f"id = '{memory_id}'", values={"is_active": False})
 
     def delete_memories_by_search(
         self,
@@ -914,7 +942,7 @@ class LanceDSPyMemoryStore:
         deleted = []
         for row in results:
             memory_id = str(row["id"])
-            self.table.delete(f"id = '{memory_id}'")
+            self.table.update(where=f"id = '{memory_id}'", values={"is_active": False})
             deleted.append(self._to_memory(dict(row)))
 
         return deleted
@@ -980,7 +1008,9 @@ class LanceDSPyMemoryStore:
                     if exact_results:
                         for row in exact_results:
                             memory_id = str(row["id"])
-                            self.table.delete(f"id = '{memory_id}'")
+                            self.table.update(
+                                where=f"id = '{memory_id}'", values={"is_active": False}
+                            )
                             deleted.append(self._to_memory(dict(row)))
                         continue
 

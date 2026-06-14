@@ -87,6 +87,12 @@ class Memory(BaseModel):
     metadata: dict[str, Any]
     """Arbitrary structured data attached at write time."""
 
+    replaces_id: str | None = None
+    """ID of the memory this record replaces (append-only history chain). ``None`` for original memories."""
+
+    is_active: bool = True
+    """Whether this memory is the current active version. ``False`` for superseded records."""
+
     created_at: str
     """ISO-8601 timestamp of creation."""
 

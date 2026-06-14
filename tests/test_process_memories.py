@@ -50,7 +50,7 @@ def store(tmp_path: pytest.TempPathFactory) -> LanceDSPyMemoryStore:
 
 
 def _rows(store: LanceDSPyMemoryStore) -> list[dict]:
-    return store.table.search().where("id != '__seed__'").to_list()
+    return store.table.search().where("id != '__seed__' AND is_active = true").to_list()
 
 
 def test_delete_memories_by_search_removes_matching_memories(store):
