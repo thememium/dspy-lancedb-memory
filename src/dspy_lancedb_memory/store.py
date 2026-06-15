@@ -178,6 +178,7 @@ class LanceDSPyMemoryStore:
         existing_content: str,
         distance: float,
         similarity_threshold: float,
+        skip_threshold: float = 0.85,
     ) -> str | None:
         new_normalized = cls._normalize_semantic_content(new_content)
         existing_normalized = cls._normalize_semantic_content(existing_content)
@@ -207,6 +208,19 @@ class LanceDSPyMemoryStore:
         same_slot_replacement = prefix >= max(
             2, min(len(new_tokens), len(existing_tokens)) - 1
         )
+        new_is_richer = len(new_tokens) > len(existing_tokens) or (
+            existing_normalized in new_normalized
+            and new_normalized != existing_normalized
+        )
+
+        # --- Skip-threshold gate ------------------------------------------------
+        # When cosine similarity is very high, the vectors are near-identical.
+        # Skip the write unless the new content is genuinely richer or replaces
+        # a specific slot value (e.g. "color is blue" → "color is red").
+        # This prevents runaway duplicate memories across repeated upsert runs.
+        if cosine_similarity >= skip_threshold:
+            if not new_is_richer and not same_slot_replacement:
+                return "skip"
 
         same_fact = (
             (prefix >= 2 and jaccard >= 0.5)
@@ -217,10 +231,6 @@ class LanceDSPyMemoryStore:
         if not same_fact or cosine_similarity < similarity_threshold:
             return None
 
-        new_is_richer = len(new_tokens) > len(existing_tokens) or (
-            existing_normalized in new_normalized
-            and new_normalized != existing_normalized
-        )
         if sequence_ratio >= 0.94 and not new_is_richer and not same_slot_replacement:
             return "skip"
 
@@ -554,6 +564,7 @@ class LanceDSPyMemoryStore:
         memory_type: MemoryType | str | None = None,
         metadata: dict[str, Any] | None = None,
         similarity_threshold: float = 0.85,
+        skip_threshold: float = 0.85,
         use_reconciler: bool = True,
     ) -> Memories:
         """Batch upsert — insert, update, or skip memories based on semantic
@@ -589,6 +600,11 @@ class LanceDSPyMemoryStore:
         similarity_threshold : float
             Cosine similarity threshold forwarded to :meth:`upsert_memory`.
             Default ``0.85``.
+        skip_threshold : float
+            Cosine similarity threshold at which near-duplicate memories are
+            skipped rather than updated or created.  When a candidate's
+            similarity meets this threshold and the new content is not
+            genuinely richer, the upsert is a no-op.  Default ``0.92``.
         use_reconciler : bool
             When ``True`` (default), extracted semantic memories are reconciled
             against existing candidates via an LLM-based :class:`MemoryReconciler`
@@ -711,6 +727,7 @@ class LanceDSPyMemoryStore:
                     ),
                     metadata=metadata,
                     similarity_threshold=similarity_threshold,
+                    skip_threshold=skip_threshold,
                     use_reconciler=False,
                 )
                 for content, inferred_type in extracted
@@ -734,6 +751,7 @@ class LanceDSPyMemoryStore:
             ),
             metadata=metadata,
             similarity_threshold=similarity_threshold,
+            skip_threshold=skip_threshold,
             use_reconciler=use_reconciler,
         )
         return [row]
@@ -748,6 +766,7 @@ class LanceDSPyMemoryStore:
         memory_type: MemoryType | str = MemoryType.SEMANTIC,
         metadata: dict[str, Any] | None = None,
         similarity_threshold: float = 0.85,
+        skip_threshold: float = 0.85,
         use_reconciler: bool = True,
     ) -> Memory:
         """Insert or update a memory based on semantic similarity.
@@ -780,6 +799,11 @@ class LanceDSPyMemoryStore:
         similarity_threshold : float
             Minimum cosine similarity (0‑1) to consider two memories
             semantically equivalent.  Default ``0.85``.
+        skip_threshold : float
+            Cosine similarity threshold at which near-duplicate memories are
+            skipped rather than updated or created.  When a candidate's
+            similarity meets this threshold and the new content is not
+            genuinely richer, the upsert is a no-op.  Default ``0.92``.
         use_reconciler : bool
             When ``True`` (default) and the memory type is ``"semantic"``,
             candidates are fed to an LLM-based :class:`MemoryReconciler` to
@@ -857,6 +881,7 @@ class LanceDSPyMemoryStore:
                             existing_content=str(existing["content"]),
                             distance=float(existing.get("_distance", 1.0)),
                             similarity_threshold=similarity_threshold,
+                            skip_threshold=skip_threshold,
                         )
                         if action == "skip":
                             return self._without_vectors([existing])[0]
@@ -879,6 +904,9 @@ class LanceDSPyMemoryStore:
                 existing = dict(results[0])
                 distance = float(existing.get("_distance", 1.0))
                 cosine_sim = 1.0 - distance
+
+                if cosine_sim >= skip_threshold:
+                    return self._without_vectors([existing])[0]
 
                 if cosine_sim >= similarity_threshold:
                     self.update_memory(memory_id=str(existing["id"]), content=content)
@@ -957,6 +985,7 @@ class LanceDSPyMemoryStore:
         extract: bool = True,
         metadata: dict[str, Any] | None = None,
         similarity_threshold: float = 0.85,
+        skip_threshold: float = 0.85,
         use_reconciler: bool = True,
     ) -> tuple[Memories, Memories]:
         """Extract and process memory operations (create/update/delete) from a conversation.
@@ -1034,6 +1063,7 @@ class LanceDSPyMemoryStore:
                     memory_type=op.memory_type or MemoryType.SEMANTIC,
                     metadata=metadata,
                     similarity_threshold=similarity_threshold,
+                    skip_threshold=skip_threshold,
                     use_reconciler=use_reconciler,
                 )
                 created_or_updated.append(result)

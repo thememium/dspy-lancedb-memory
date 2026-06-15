@@ -23,6 +23,12 @@ EMBEDDINGS: dict[str, list[float]] = {
     "what food do I like": [0.95, 0.0, 0.05],
     "car color is blue": [0.0, 0.5, 0.5],
     "car color is red": [0.0, 0.5, 0.5],
+    # skip-threshold test vectors — L2 distance ≈ 0.057 with "I love hiking" (1 - dist ≈ 0.94)
+    "hiking is enjoyable": [0.05, 0.02, 0.98],
+    # skip-threshold test vectors — L2 distance ≈ 0.028 with "car color is blue" (1 - dist ≈ 0.97)
+    "vehicle color blue": [0.02, 0.48, 0.5],
+    # skip-threshold test vector — L2 distance ≈ 0.094 with "car color is blue" (1 - dist ≈ 0.91, >= 0.85 skip)
+    "my car is blue": [0.08, 0.45, 0.5],
 }
 
 
@@ -1009,3 +1015,103 @@ def test_delete_memory_on_already_inactive_is_idempotent(
     assert len(_rows(store)) == 1
     row = _row_by_id(store, mem.id)
     assert row["is_active"] is False
+
+
+# ---------------------------------------------------------------------------
+# Skip-threshold tests — near-duplicate suppression
+# ---------------------------------------------------------------------------
+
+
+def test_upsert_semantic_skip_threshold_skips_near_duplicate(
+    store: LanceDSPyMemoryStore,
+) -> None:
+    """When cosine similarity >= skip_threshold (0.92) and the new content is
+    not genuinely richer, upsert should skip — returning the existing memory
+    without creating a duplicate."""
+    original = store.create_memory(
+        user_id="user-1",
+        content="I love hiking",
+        memory_type="semantic",
+    )
+
+    result = store.upsert_memory(
+        user_id="user-1",
+        content="hiking is enjoyable",
+        memory_type="semantic",
+        use_reconciler=False,
+    )
+
+    assert result.id == original.id
+    assert len(_rows(store)) == 1
+    assert _row_by_id(store, original.id)["content"] == "I love hiking"
+
+
+def test_upsert_semantic_skip_threshold_allows_richer_update(
+    store: LanceDSPyMemoryStore,
+) -> None:
+    """When cosine similarity >= skip_threshold but the new content IS richer
+    (adds detail), upsert should still update — the skip gate only blocks
+    near-duplicates that aren't improvements."""
+    original = store.create_memory(
+        user_id="user-1",
+        content="favorite food is pizza",
+        memory_type="semantic",
+    )
+
+    result = store.upsert_memory(
+        user_id="user-1",
+        content="favorite food is pepperoni pizza",
+        memory_type="semantic",
+        similarity_threshold=0.85,
+        use_reconciler=False,
+    )
+
+    assert result.id != original.id
+    assert len(_active_rows(store)) == 1
+    assert result.content == "favorite food is pepperoni pizza"
+    assert _row_by_id(store, original.id)["is_active"] is False
+
+
+def test_upsert_nonsemantic_skip_threshold_skips_near_duplicate(
+    store: LanceDSPyMemoryStore,
+) -> None:
+    """Non-semantic path: when cosine similarity >= skip_threshold, skip
+    the write even though the content strings differ."""
+    original = store.create_memory(
+        user_id="user-1",
+        content="car color is blue",
+        memory_type="preference",
+    )
+
+    result = store.upsert_memory(
+        user_id="user-1",
+        content="vehicle color blue",
+        memory_type="preference",
+        use_reconciler=False,
+    )
+
+    assert result.id == original.id
+    assert len(_rows(store)) == 1
+    assert _row_by_id(store, original.id)["content"] == "car color is blue"
+
+
+def test_upsert_nonsemantic_skips_when_above_similarity_threshold(
+    store: LanceDSPyMemoryStore,
+) -> None:
+    """Non-semantic path: when cosine similarity >= skip_threshold (0.85),
+    the memory is considered close enough to skip — no update, no create."""
+    original = store.create_memory(
+        user_id="user-1",
+        content="car color is blue",
+        memory_type="preference",
+    )
+
+    result = store.upsert_memory(
+        user_id="user-1",
+        content="my car is blue",
+        memory_type="preference",
+        use_reconciler=False,
+    )
+
+    assert result.id == original.id
+    assert len(_rows(store)) == 1
