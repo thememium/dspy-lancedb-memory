@@ -409,6 +409,14 @@ class LanceDSPyMemoryStore:
                 extractor(messages=contents).memories,
             )
 
+            seen_contents: set[str] = set()
+            deduplicated: list[tuple[str, MemoryType | str]] = []
+            for content_val, inferred_type in extracted:
+                if content_val not in seen_contents:
+                    seen_contents.add(content_val)
+                    deduplicated.append((content_val, inferred_type))
+            extracted = deduplicated
+
             stored = [
                 self.create_memory(
                     user_id=user_id,
@@ -626,6 +634,14 @@ class LanceDSPyMemoryStore:
                 extractor(messages=contents).memories,
             )
 
+            seen_contents: set[str] = set()
+            deduplicated: list[tuple[str, MemoryType | str]] = []
+            for content_val, inferred_type in extracted:
+                if content_val not in seen_contents:
+                    seen_contents.add(content_val)
+                    deduplicated.append((content_val, inferred_type))
+            extracted = deduplicated
+
             if use_reconciler:
                 reconciler = MemoryReconciler()
                 results: list[Memory] = []
@@ -658,6 +674,14 @@ class LanceDSPyMemoryStore:
                     )
 
                     if candidates:
+                        nearest_distance = float(candidates[0].get("_distance", 1.0))
+                        nearest_similarity = 1.0 - nearest_distance
+                        if nearest_similarity >= skip_threshold:
+                            results.append(
+                                self._without_vectors([dict(candidates[0])])[0]
+                            )
+                            continue
+
                         existing_list = [
                             {
                                 "id": str(c["id"]),
@@ -836,8 +860,11 @@ class LanceDSPyMemoryStore:
         if results:
             if resolved_type == MemoryType.SEMANTIC.value:
                 if use_reconciler:
-                    # Use the LLM reconciler for nuanced keep/update/create
-                    # decisions among the semantic candidate pool.
+                    nearest_distance = float(results[0].get("_distance", 1.0))
+                    nearest_similarity = 1.0 - nearest_distance
+                    if nearest_similarity >= skip_threshold:
+                        return self._without_vectors([dict(results[0])])[0]
+
                     reconciler = MemoryReconciler()
                     existing_list = [
                         {

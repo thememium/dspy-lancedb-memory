@@ -330,6 +330,7 @@ def test_reconciler_updates_refinement(store, monkeypatch):
         user_id="user-1",
         content="name is Edward Boswell",
         memory_type="semantic",
+        skip_threshold=1.0,
     )
 
     assert result.id != original.id
@@ -351,6 +352,7 @@ def test_reconciler_creates_unrelated_memory(store, monkeypatch):
         user_id="user-1",
         content="favorite color is blue",
         memory_type="semantic",
+        skip_threshold=1.0,
     )
 
     assert len(_rows(store)) == 2
@@ -376,6 +378,7 @@ def test_reconciler_extract_path_consolidates_name(store, monkeypatch):
         user_id="user-1",
         contents=[{"role": "user", "content": "My full name is Edward Boswell."}],
         extract=True,
+        skip_threshold=1.0,
     )
 
     assert len(results) == 1
