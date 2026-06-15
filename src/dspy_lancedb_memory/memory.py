@@ -32,6 +32,7 @@ from lancedb.rerankers import Reranker
 from dspy_lancedb_memory.config import DEFAULT_EMBEDDING_MODEL
 from dspy_lancedb_memory.config import configure as _configure
 from dspy_lancedb_memory.config import (
+    get_configured_lm,
     get_embedding_config,
     get_reranker_lm_config,
     get_signature_config,
@@ -206,6 +207,7 @@ def Store(
     return LanceDSPyMemoryStore(
         uri=uri,
         table_name=table_name,
+        extraction_lm=get_configured_lm(),
         embedding_lm=embedding_lm,
         embedding_dim=embedding_dim,
         signature=signature,
