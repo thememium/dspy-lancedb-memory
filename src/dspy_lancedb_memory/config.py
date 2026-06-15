@@ -81,10 +81,8 @@ def configure(
 
     if extraction_lm is not None:
         _lm = extraction_lm
-        dspy.configure(lm=extraction_lm)
     elif model is not None:
         _lm = dspy.LM(model=model)
-        dspy.configure(lm=_lm)
 
     if embedding_lm is not None:
         _embedding_lm = embedding_lm
