@@ -1,5 +1,21 @@
 # Changelog
 
+## v0.1.8 (2026-06-15)
+
+[Compare changes](https://github.com/thememium/dspy-lancedb-memory/compare/v0.1.7...v0.1.8)
+
+### 🚀 Enhancements
+
+- **memory**: add skip‑threshold option to upsert and related methods ([99e55b8](https://github.com/thememium/dspy-lancedb-memory/commit/99e55b885414cefe185d8899b71f179638b00a41))
+
+### 💅 Refactors
+
+- **memory**: dedupe extracted contents and skip duplicates ([0c8809d](https://github.com/thememium/dspy-lancedb-memory/commit/0c8809d8b83135b259b9c8813eba85a6e20c4f86))
+
+### Contributors
+
+- Edward Boswell <thememium@gmail.com>
+
 ## v0.1.7 (2026-06-14)
 
 [Compare changes](https://github.com/thememium/dspy-lancedb-memory/compare/v0.1.6...v0.1.7)
