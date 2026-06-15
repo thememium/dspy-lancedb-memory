@@ -1,5 +1,26 @@
 # Changelog
 
+## v0.1.9 (2026-06-15)
+
+[Compare changes](https://github.com/thememium/dspy-lancedb-memory/compare/v0.1.8...v0.1.9)
+
+### 🚀 Enhancements
+
+- **memory**: add extraction LM support to LanceDSPyMemoryStore ([610f3c3](https://github.com/thememium/dspy-lancedb-memory/commit/610f3c374ead73f933f22528f7f13a713d8a0bbe))
+- **dspy_lancedb_memory**: add extraction LM support for memory extraction ([12dcd53](https://github.com/thememium/dspy-lancedb-memory/commit/12dcd533840909e5d3bc8df69d657bd84fd0c024))
+
+### 💅 Refactors
+
+- **dspy_lancedb_memory/config.py**: remove duplicate dspy.configure calls ([38efb96](https://github.com/thememium/dspy-lancedb-memory/commit/38efb9694e97a193dacba8c5a073b11253c691ee))
+
+### Other Changes
+
+- Merge pull request #4 from thememium/eboswell/fix/extractor-dspy-lm (#4) ([7b4312d](https://github.com/thememium/dspy-lancedb-memory/commit/7b4312db6a89643aea29376459af9506cc354d89))
+
+### Contributors
+
+- Edward Boswell <thememium@gmail.com>
+
 ## v0.1.8 (2026-06-15)
 
 [Compare changes](https://github.com/thememium/dspy-lancedb-memory/compare/v0.1.7...v0.1.8)
