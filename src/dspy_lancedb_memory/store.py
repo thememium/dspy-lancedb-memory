@@ -41,6 +41,7 @@ class LanceDSPyMemoryStore:
         self,
         uri: str = ".lancedb",
         table_name: str = "memories",
+        extraction_lm: dspy.LM | None = None,
         embedding_lm=None,
         embedding_dim: int | None = None,
         signature=None,
@@ -51,6 +52,7 @@ class LanceDSPyMemoryStore:
         self.table_name = table_name
         self.embedding_dim = embedding_dim
         self.rerank_limit_multiplier = max(rerank_limit_multiplier, 1)
+        self._extraction_lm = extraction_lm
 
         if embedding_lm is None:
             embedding_lm = dspy.LM("openrouter/openai/text-embedding-3-small")
@@ -404,10 +406,11 @@ class LanceDSPyMemoryStore:
                 raise ValueError("contents is required when extract=True")
 
             extractor = MemoryExtractor(signature=self._extraction_signature)
-            extracted = cast(
-                list[tuple[str, MemoryType | str]],
-                extractor(messages=contents).memories,
-            )
+            with dspy.context(lm=self._extraction_lm):
+                extracted = cast(
+                    list[tuple[str, MemoryType | str]],
+                    extractor(messages=contents).memories,
+                )
 
             seen_contents: set[str] = set()
             deduplicated: list[tuple[str, MemoryType | str]] = []
@@ -629,10 +632,11 @@ class LanceDSPyMemoryStore:
                 raise ValueError("contents is required when extract=True")
 
             extractor = MemoryExtractor(signature=self._extraction_signature)
-            extracted = cast(
-                list[tuple[str, MemoryType | str]],
-                extractor(messages=contents).memories,
-            )
+            with dspy.context(lm=self._extraction_lm):
+                extracted = cast(
+                    list[tuple[str, MemoryType | str]],
+                    extractor(messages=contents).memories,
+                )
 
             seen_contents: set[str] = set()
             deduplicated: list[tuple[str, MemoryType | str]] = []
@@ -690,11 +694,12 @@ class LanceDSPyMemoryStore:
                             }
                             for c in candidates
                         ]
-                        decision = reconciler(
-                            new_memory_content=content,
-                            new_memory_type=str(memory_type_str),
-                            existing_memories=existing_list,
-                        ).reconciled
+                        with dspy.context(lm=self._extraction_lm):
+                            decision = reconciler(
+                                new_memory_content=content,
+                                new_memory_type=str(memory_type_str),
+                                existing_memories=existing_list,
+                            ).reconciled
                     else:
                         decision = ReconciledMemory(
                             action="create",
@@ -874,11 +879,12 @@ class LanceDSPyMemoryStore:
                         }
                         for c in results
                     ]
-                    decision = reconciler(
-                        new_memory_content=content,
-                        new_memory_type=str(resolved_type),
-                        existing_memories=existing_list,
-                    ).reconciled
+                    with dspy.context(lm=self._extraction_lm):
+                        decision = reconciler(
+                            new_memory_content=content,
+                            new_memory_type=str(resolved_type),
+                            existing_memories=existing_list,
+                        ).reconciled
 
                     if decision.action == "keep":
                         kept = (
@@ -1024,7 +1030,8 @@ class LanceDSPyMemoryStore:
 
         if extract:
             extractor = MemoryOperationExtractor()
-            operations = extractor(messages=contents).operations
+            with dspy.context(lm=self._extraction_lm):
+                operations = extractor(messages=contents).operations
         else:
             operations = [
                 MemoryOperation(
