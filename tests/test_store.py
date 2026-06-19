@@ -495,6 +495,220 @@ def test_parallel_with_multiple_memories(store, monkeypatch):
     assert "favorite programming language is python" in contents
 
 
+def test_parallel_keep_action(store, monkeypatch):
+    store.create_memory(
+        user_id="user-1",
+        content="name is Edward",
+        memory_type="semantic",
+    )
+
+    monkeypatch.setattr(
+        "dspy_lancedb_memory.store.MemoryExtractor.forward",
+        lambda self, messages: dspy.Prediction(
+            memories=[("name is Edward", "semantic")]
+        ),
+    )
+    monkeypatch.setattr("dspy_lancedb_memory.store.MemoryReconciler", StubReconciler)
+
+    results = store.upsert_memories(
+        user_id="user-1",
+        contents=[{"role": "user", "content": "My name is Edward."}],
+        extract=True,
+        skip_threshold=1.0,
+        num_threads=4,
+    )
+
+    assert len(results) == 1
+    assert results[0].content == "name is Edward"
+    assert len(_rows(store)) == 1
+
+
+def test_parallel_create_action(store, monkeypatch):
+    store.create_memory(
+        user_id="user-1",
+        content="name is Edward",
+        memory_type="semantic",
+    )
+
+    monkeypatch.setattr(
+        "dspy_lancedb_memory.store.MemoryExtractor.forward",
+        lambda self, messages: dspy.Prediction(
+            memories=[("favorite color is blue", "semantic")]
+        ),
+    )
+    monkeypatch.setattr("dspy_lancedb_memory.store.MemoryReconciler", StubReconciler)
+
+    results = store.upsert_memories(
+        user_id="user-1",
+        contents=[{"role": "user", "content": "My favorite color is blue."}],
+        extract=True,
+        skip_threshold=1.0,
+        num_threads=4,
+    )
+
+    assert len(results) == 1
+    assert results[0].content == "favorite color is blue"
+    assert len(_rows(store)) == 2
+
+
+def test_parallel_update_action(store, monkeypatch):
+    original = store.create_memory(
+        user_id="user-1",
+        content="name is Edward",
+        memory_type="semantic",
+    )
+
+    monkeypatch.setattr(
+        "dspy_lancedb_memory.store.MemoryExtractor.forward",
+        lambda self, messages: dspy.Prediction(
+            memories=[("name is Edward Boswell", "semantic")]
+        ),
+    )
+    monkeypatch.setattr("dspy_lancedb_memory.store.MemoryReconciler", StubReconciler)
+
+    results = store.upsert_memories(
+        user_id="user-1",
+        contents=[{"role": "user", "content": "My full name is Edward Boswell."}],
+        extract=True,
+        skip_threshold=1.0,
+        num_threads=4,
+    )
+
+    assert len(results) == 1
+    assert results[0].content == "name is Edward Boswell"
+    assert results[0].id != original.id
+    assert len(_active_rows(store)) == 1
+    assert _row_by_id(store, original.id)["is_active"] is False
+
+
+def test_parallel_mixed_actions(store, monkeypatch):
+    store.create_memory(
+        user_id="user-1",
+        content="name is Edward",
+        memory_type="semantic",
+    )
+
+    monkeypatch.setattr(
+        "dspy_lancedb_memory.store.MemoryExtractor.forward",
+        lambda self, messages: dspy.Prediction(
+            memories=[
+                ("name is Edward", "semantic"),
+                ("favorite color is blue", "semantic"),
+            ]
+        ),
+    )
+    monkeypatch.setattr("dspy_lancedb_memory.store.MemoryReconciler", StubReconciler)
+
+    results = store.upsert_memories(
+        user_id="user-1",
+        contents=[{"role": "user", "content": "I'm Edward and I like blue."}],
+        extract=True,
+        skip_threshold=1.0,
+        num_threads=4,
+    )
+
+    assert len(results) == 2
+    contents = {r.content for r in results}
+    assert "name is Edward" in contents
+    assert "favorite color is blue" in contents
+    assert len(_rows(store)) == 2
+
+
+def test_parallel_num_threads_one_is_sequential(store, monkeypatch):
+    store.create_memory(
+        user_id="user-1",
+        content="name is Edward",
+        memory_type="semantic",
+    )
+
+    monkeypatch.setattr(
+        "dspy_lancedb_memory.store.MemoryExtractor.forward",
+        lambda self, messages: dspy.Prediction(
+            memories=[("name is Edward Boswell", "semantic")]
+        ),
+    )
+    monkeypatch.setattr("dspy_lancedb_memory.store.MemoryReconciler", StubReconciler)
+
+    results = store.upsert_memories(
+        user_id="user-1",
+        contents=[{"role": "user", "content": "My full name is Edward Boswell."}],
+        extract=True,
+        skip_threshold=1.0,
+        num_threads=1,
+    )
+
+    assert len(results) == 1
+    assert results[0].content == "name is Edward Boswell"
+
+
+def test_parallel_deduplicates_extracted_memories(store, monkeypatch):
+    monkeypatch.setattr(
+        "dspy_lancedb_memory.store.MemoryExtractor.forward",
+        lambda self, messages: dspy.Prediction(
+            memories=[
+                ("favorite food is pizza", "semantic"),
+                ("favorite food is pizza", "semantic"),
+                ("favorite color is blue", "semantic"),
+            ]
+        ),
+    )
+    monkeypatch.setattr("dspy_lancedb_memory.store.MemoryReconciler", StubReconciler)
+
+    results = store.upsert_memories(
+        user_id="user-1",
+        contents=[{"role": "user", "content": "I like pizza and blue."}],
+        extract=True,
+        num_threads=4,
+    )
+
+    assert len(results) == 2
+
+
+def test_parallel_empty_extraction(store, monkeypatch):
+    monkeypatch.setattr(
+        "dspy_lancedb_memory.store.MemoryExtractor.forward",
+        lambda self, messages: dspy.Prediction(memories=[]),
+    )
+    monkeypatch.setattr("dspy_lancedb_memory.store.MemoryReconciler", StubReconciler)
+
+    results = store.upsert_memories(
+        user_id="user-1",
+        contents=[{"role": "user", "content": "nothing memorable"}],
+        extract=True,
+        num_threads=4,
+    )
+
+    assert len(results) == 0
+
+
+def test_parallel_user_scoping(store, monkeypatch):
+    store.create_memory(
+        user_id="user-1",
+        content="name is Edward",
+        memory_type="semantic",
+    )
+
+    monkeypatch.setattr(
+        "dspy_lancedb_memory.store.MemoryExtractor.forward",
+        lambda self, messages: dspy.Prediction(
+            memories=[("name is Edward", "semantic")]
+        ),
+    )
+    monkeypatch.setattr("dspy_lancedb_memory.store.MemoryReconciler", StubReconciler)
+
+    results = store.upsert_memories(
+        user_id="user-2",
+        contents=[{"role": "user", "content": "My name is Edward."}],
+        extract=True,
+        skip_threshold=1.0,
+        num_threads=4,
+    )
+
+    assert len(results) == 1
+    assert results[0].content == "name is Edward"
+    assert len(_rows(store)) == 2
+
+
 # ---------------------------------------------------------------------------
 # Regression tests — capture CURRENT behavior before refactoring
 # ---------------------------------------------------------------------------
