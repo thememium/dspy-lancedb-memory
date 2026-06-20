@@ -1,5 +1,17 @@
 # Changelog
 
+## v0.1.11 (2026-06-20)
+
+[Compare changes](https://github.com/thememium/dspy-lancedb-memory/compare/v0.1.10...v0.1.11)
+
+### 📖 Documentation
+
+- **pyproject.toml**: update project description to explain persistent vector store ([ade59b7](https://github.com/thememium/dspy-lancedb-memory/commit/ade59b7396efd660995ba18bc91c855d32d14e29))
+
+### Contributors
+
+- Edward Boswell <thememium@gmail.com>
+
 ## v0.1.10 (2026-06-20)
 
 [Compare changes](https://github.com/thememium/dspy-lancedb-memory/compare/v0.1.9...v0.1.10)

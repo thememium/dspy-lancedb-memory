@@ -1,6 +1,6 @@
 [project]
 name = "dspy-lancedb-memory"
-version = "0.1.10"
+version = "0.1.11"
 description = "Persistent vector memory store for DSPy-powered AI agents — extract, store, and recall structured memories from conversation."
 readme = "README.md"
 authors = [{ name = "Edward Boswell", email = "thememium@gmail.com" }]
