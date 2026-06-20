@@ -223,6 +223,33 @@ all_results = store.search_memories(
 )
 ```
 
+### Custom Scope and Metadata Filters
+
+Use ``scope`` for custom ownership or routing dimensions beyond ``user_id``, ``session_id``, and ``conversation_id``. Scope is returned as ``memory.scope`` and can be used during search, upsert, delete-by-search, and process flows.
+
+```python
+store.create_memory(
+    user_id="user_123",
+    content="Project uses LanceDB for vector memory.",
+    memory_type="project_note",
+    scope={
+        "workspace_id": "acme",
+        "project_id": "rag-agent",
+        "agent_id": "planner",
+    },
+    metadata={"source": "chat", "priority": "high"},
+)
+
+results = store.search_memories(
+    user_id="user_123",
+    query="vector memory setup",
+    scope={"project_id": "rag-agent"},
+    metadata_filter={"source": "chat"},
+)
+```
+
+Custom extraction signatures may also return per-memory ``metadata`` on each ``MemoryItem``. That metadata is merged with the call-level ``metadata`` passed to ``create_memories`` or ``upsert_memories``.
+
 ### Raw Store (No Extraction)
 
 Store content verbatim without LLM extraction.
