@@ -233,9 +233,9 @@ store.create_memory(
     content="Project uses LanceDB for vector memory.",
     memory_type="project_note",
     scope={
-        "workspace_id": "acme",
-        "project_id": "rag-agent",
-        "agent_id": "planner",
+        "tenant": "acme",
+        "repo": "rag-agent",
+        "environment": "prod",
     },
     metadata={"source": "chat", "priority": "high"},
 )
@@ -243,12 +243,51 @@ store.create_memory(
 results = store.search_memories(
     user_id="user_123",
     query="vector memory setup",
-    scope={"project_id": "rag-agent"},
+    scope={"repo": "rag-agent", "environment": "prod"},
     metadata_filter={"source": "chat"},
 )
 ```
 
 Custom extraction signatures may also return per-memory ``metadata`` on each ``MemoryItem``. That metadata is merged with the call-level ``metadata`` passed to ``create_memories`` or ``upsert_memories``.
+
+Use ``Scope`` when you want a typed helper instead of a raw dict:
+
+```python
+from dspy_lancedb_memory import Scope
+
+scope = Scope(tenant="acme", repo="rag-agent", environment="prod")
+store.create_memory(
+    user_id="user_123",
+    content="Production repo uses LanceDB for memory.",
+    scope=scope,
+)
+```
+
+Bind repeated context once with ``with_scope()``:
+
+```python
+project_store = store.with_scope(
+    user_id="user_123",
+    scope={"tenant": "acme", "repo": "rag-agent"},
+)
+
+project_store.create_memory(content="Project uses LanceDB.")
+project_store.search_memories(query="vector store")
+```
+
+Metadata and scope filters support equality by default plus simple operators:
+
+```python
+results = store.search_memories(
+    user_id="user_123",
+    query="important project notes",
+    metadata_filter={
+        "priority": {"in": ["high", "urgent"]},
+        "confidence": {"gte": 0.8},
+        "tags": {"contains": "backend"},
+    },
+)
+```
 
 ### Raw Store (No Extraction)
 
@@ -271,6 +310,25 @@ store.update_memory(
     memory_id="some-uuid",
     content="Updated memory text",
 )
+
+# Patch metadata or scope while preserving append-only history
+store.update_memory_metadata(
+    memory_id="some-uuid",
+    metadata={"priority": "high"},
+)
+
+store.update_memory_scope(
+    memory_id="some-uuid",
+    scope={"project_id": "new-project"},
+)
+
+# Deterministic inspection without vector search
+memory = store.get_memory(memory_id="some-uuid")
+all_project_memories = store.list_memories(
+    user_id="user_123",
+    scope={"project_id": "rag-agent"},
+)
+history = store.get_memory_history(memory_id="some-uuid")
 
 # Delete a memory
 store.delete_memory(memory_id="some-uuid")
@@ -483,6 +541,8 @@ When storing directly (without extraction), the default type is `semantic`.
 | [`LiteLLMReranker`](#using-the-reranker) | Cross-encoder reranker via ``litellm.rerank()`` — supports Cohere, Jina, and any LiteLLM-compatible provider |
 | [`MemoryType`](#memory-taxonomy) | Enum of the six memory categories |
 | [`MemoryItem`](#extract-memories-from-conversation) | Pydantic model for extracted memories |
+| `Scope` | Typed helper for arbitrary custom scope fields |
+| `BoundMemoryStore` | Returned by ``store.with_scope(...)`` for pre-bound user/session/scope context |
 | [`upsert_memory`](#upsert--insert-update-or-skip) | Semantic upsert — insert, update, or skip based on content similarity |
 | `session_id` / `conversation_id` | Optional scoping fields on ``create_memory``, ``create_memories``, ``search_memories``, and ``upsert_memory`` |
 
