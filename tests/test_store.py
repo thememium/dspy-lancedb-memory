@@ -1441,3 +1441,129 @@ def test_upsert_nonsemantic_skips_when_above_similarity_threshold(
 
     assert result.id == original.id
     assert len(_rows(store)) == 1
+
+
+# ---------------------------------------------------------------------------
+# Custom scope / metadata filters
+# ---------------------------------------------------------------------------
+
+
+def test_search_memories_filters_by_scope(store: LanceDSPyMemoryStore) -> None:
+    store.create_memory(
+        user_id="user-1",
+        content="favorite food is pizza",
+        memory_type="semantic",
+        scope={"workspace_id": "workspace-a", "project_id": "alpha"},
+    )
+    scoped = store.create_memory(
+        user_id="user-1",
+        content="favorite food is pizza",
+        memory_type="semantic",
+        scope={"workspace_id": "workspace-a", "project_id": "beta"},
+    )
+
+    results = store.search_memories(
+        user_id="user-1",
+        query="what food do I like",
+        scope={"project_id": "beta"},
+    )
+
+    assert [r.id for r in results] == [scoped.id]
+    assert results[0].scope == {"workspace_id": "workspace-a", "project_id": "beta"}
+
+
+def test_upsert_memory_respects_scope_boundaries(store: LanceDSPyMemoryStore) -> None:
+    original = store.upsert_memory(
+        user_id="user-1",
+        content="favorite food is pizza",
+        memory_type="semantic",
+        scope={"project_id": "alpha"},
+        use_reconciler=False,
+    )
+
+    result = store.upsert_memory(
+        user_id="user-1",
+        content="favorite food is pizza",
+        memory_type="semantic",
+        scope={"project_id": "beta"},
+        use_reconciler=False,
+    )
+
+    assert result.id != original.id
+    assert len(_rows(store)) == 2
+    assert result.scope == {"project_id": "beta"}
+
+
+def test_search_memories_filters_by_metadata(store: LanceDSPyMemoryStore) -> None:
+    store.create_memory(
+        user_id="user-1",
+        content="favorite food is pizza",
+        memory_type="semantic",
+        metadata={"source": "chat"},
+    )
+    doc_memory = store.create_memory(
+        user_id="user-1",
+        content="favorite food is pizza",
+        memory_type="semantic",
+        metadata={"source": "doc", "priority": "high"},
+    )
+
+    results = store.search_memories(
+        user_id="user-1",
+        query="what food do I like",
+        metadata_filter={"source": "doc"},
+    )
+
+    assert [r.id for r in results] == [doc_memory.id]
+    assert results[0].metadata == {"source": "doc", "priority": "high"}
+
+
+def test_update_memory_preserves_scope(store: LanceDSPyMemoryStore) -> None:
+    original = store.create_memory(
+        user_id="user-1",
+        content="favorite food is pizza",
+        memory_type="semantic",
+        scope={"project_id": "alpha"},
+    )
+
+    store.update_memory(
+        memory_id=original.id,
+        content="favorite food is pepperoni pizza",
+    )
+
+    active = _active_rows(store)
+    assert len(active) == 1
+    updated = store._without_vectors([active[0]])[0]
+    assert updated.scope == {"project_id": "alpha"}
+
+
+def test_create_memories_merges_extracted_metadata(
+    store: LanceDSPyMemoryStore, monkeypatch
+) -> None:
+    monkeypatch.setattr(
+        "dspy_lancedb_memory.store.MemoryExtractor.forward",
+        lambda self, messages: dspy.Prediction(
+            memories=[
+                (
+                    "favorite programming language is python",
+                    "semantic",
+                    {"source": "extractor", "confidence": 0.9},
+                )
+            ]
+        ),
+    )
+
+    results = store.create_memories(
+        user_id="user-1",
+        contents=[{"role": "user", "content": "I like Python."}],
+        metadata={"batch": "b1"},
+        scope={"project_id": "alpha"},
+    )
+
+    assert len(results) == 1
+    assert results[0].metadata == {
+        "batch": "b1",
+        "source": "extractor",
+        "confidence": 0.9,
+    }
+    assert results[0].scope == {"project_id": "alpha"}

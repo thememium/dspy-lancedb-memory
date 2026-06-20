@@ -58,6 +58,7 @@ class _SingleMemoryReconciler:
             user_id=kwargs["user_id"],
             session_id=kwargs["session_id"],
             conversation_id=kwargs["conversation_id"],
+            scope=kwargs["scope"],
             metadata=kwargs["metadata"],
             skip_threshold=self._skip_threshold,
             reconciler=self._reconciler,
@@ -178,6 +179,88 @@ class LanceDSPyMemoryStore:
                 break
             shared += 1
         return shared
+
+    _SCOPE_METADATA_KEY = "_scope"
+
+    @staticmethod
+    def _json_dict(value: Any) -> dict[str, Any]:
+        if isinstance(value, dict):
+            return dict(value)
+        if not value:
+            return {}
+        if isinstance(value, str):
+            try:
+                parsed = json.loads(value)
+            except json.JSONDecodeError:
+                return {}
+            return parsed if isinstance(parsed, dict) else {}
+        return {}
+
+    @classmethod
+    def _split_metadata_scope(
+        cls, metadata: dict[str, Any] | str | None
+    ) -> tuple[dict[str, Any], dict[str, Any]]:
+        clean_metadata = cls._json_dict(metadata)
+        scope = cls._json_dict(clean_metadata.pop(cls._SCOPE_METADATA_KEY, {}))
+        return clean_metadata, scope
+
+    @classmethod
+    def _pack_metadata(
+        cls,
+        metadata: dict[str, Any] | None,
+        scope: dict[str, Any] | None,
+    ) -> str:
+        packed = dict(metadata or {})
+        if scope:
+            packed[cls._SCOPE_METADATA_KEY] = dict(scope)
+        return json.dumps(packed)
+
+    @staticmethod
+    def _matches_filter(value: Any, expected: Any) -> bool:
+        if isinstance(expected, dict):
+            if not isinstance(value, dict):
+                return False
+            return all(
+                key in value
+                and LanceDSPyMemoryStore._matches_filter(value[key], nested)
+                for key, nested in expected.items()
+            )
+        if isinstance(expected, (list, tuple, set)):
+            return value in expected
+        return value == expected
+
+    @classmethod
+    def _row_matches_json_filters(
+        cls,
+        row: dict[str, Any],
+        *,
+        scope: dict[str, Any] | None = None,
+        metadata_filter: dict[str, Any] | None = None,
+    ) -> bool:
+        metadata, row_scope = cls._split_metadata_scope(row.get("metadata"))
+        if scope and not cls._matches_filter(row_scope, scope):
+            return False
+        if metadata_filter and not cls._matches_filter(metadata, metadata_filter):
+            return False
+        return True
+
+    @classmethod
+    def _filter_rows_by_json_fields(
+        cls,
+        rows: list[dict[str, Any]],
+        *,
+        scope: dict[str, Any] | None = None,
+        metadata_filter: dict[str, Any] | None = None,
+    ) -> list[dict[str, Any]]:
+        if not scope and not metadata_filter:
+            return rows
+        return [
+            row
+            for row in rows
+            if cls._row_matches_json_filters(
+                row, scope=scope, metadata_filter=metadata_filter
+            )
+        ]
 
     @staticmethod
     def _build_filters(
@@ -334,6 +417,7 @@ class LanceDSPyMemoryStore:
         conversation_id: str = "",
         memory_type: MemoryType | str,
         metadata: dict[str, Any] | None,
+        scope: dict[str, Any] | None = None,
     ) -> dict[str, Any]:
         now = datetime.now(timezone.utc).isoformat()
         resolved_type = memory_type_from_string(memory_type)
@@ -350,7 +434,7 @@ class LanceDSPyMemoryStore:
             "conversation_id": conversation_id,
             "memory_type": type_value,
             "content": content,
-            "metadata": json.dumps(metadata or {}),
+            "metadata": self._pack_metadata(metadata, scope),
             "created_at": now,
             "updated_at": now,
             "replaces_id": None,
@@ -373,8 +457,11 @@ class LanceDSPyMemoryStore:
             distance = float(clean.pop("_distance"))
             relevance_score = 1.0 - distance
 
-        if isinstance(clean.get("metadata"), str):
-            clean["metadata"] = json.loads(clean["metadata"])
+        metadata, scope = LanceDSPyMemoryStore._split_metadata_scope(
+            clean.get("metadata")
+        )
+        clean["metadata"] = metadata
+        clean["scope"] = scope
 
         memory = Memory.model_validate(clean)
         memory.relevance_score = relevance_score
@@ -390,6 +477,47 @@ class LanceDSPyMemoryStore:
                 result.append(LanceDSPyMemoryStore._to_memory(r))
         return result
 
+    @staticmethod
+    def _merge_metadata(
+        base: dict[str, Any] | None,
+        extra: dict[str, Any] | None,
+    ) -> dict[str, Any]:
+        merged = dict(base or {})
+        merged.update(extra or {})
+        return merged
+
+    @staticmethod
+    def _normalize_extracted_memories(
+        extracted: list[Any],
+    ) -> list[tuple[str, MemoryType | str, dict[str, Any]]]:
+        normalized: list[tuple[str, MemoryType | str, dict[str, Any]]] = []
+        seen_contents: set[str] = set()
+        for item in extracted:
+            item_metadata: dict[str, Any] = {}
+            if isinstance(item, tuple):
+                if len(item) == 2:
+                    content, inferred_type = item
+                elif len(item) >= 3:
+                    content, inferred_type, item_metadata = item[:3]
+                else:
+                    continue
+            else:
+                content = getattr(item, "content", "")
+                inferred_type = getattr(item, "type", MemoryType.SEMANTIC)
+                item_metadata = dict(getattr(item, "metadata", {}) or {})
+            content_value = str(content).strip()
+            if not content_value or content_value in seen_contents:
+                continue
+            seen_contents.add(content_value)
+            normalized.append(
+                (
+                    content_value,
+                    memory_type_from_string(inferred_type),
+                    dict(item_metadata or {}),
+                )
+            )
+        return normalized
+
     def create_memories(
         self,
         *,
@@ -400,6 +528,7 @@ class LanceDSPyMemoryStore:
         extract: bool = True,
         memory_type: MemoryType | str | None = None,
         metadata: dict[str, Any] | None = None,
+        scope: dict[str, Any] | None = None,
     ) -> Memories:
         """
         Store content for a user — either raw or extracted from conversation.
@@ -418,18 +547,20 @@ class LanceDSPyMemoryStore:
         extract : bool
             When ``True``, a DSPy Signature is used to extract **all** salient
             memories from *contents*. When ``False``, *contents* must contain
-            exactly one item which is stored verbatim.
+            exactly one item and is stored verbatim.
         memory_type : MemoryType | str | None
             Force a specific memory category. If ``None`` while *extract* is ``True``,
-            the LLM chooses the categories. If ``None`` while *extract* is ``False``,
-            it falls back to ``MemoryType.SEMANTIC``.
+            the LLM chooses categories. If ``None`` while *extract* is ``False``,
+            falls back to ``MemoryType.SEMANTIC``.
         metadata : dict[str, Any] | None
-            Bag of structured data attached to the memory row but not embedded.
+            Structured data attached to every new memory row but not embedded.
+        scope : dict[str, Any] | None
+            Custom ownership/query dimensions attached to every new memory row.
 
         Returns
         -------
         Memories
-            The full rows that were written to LanceDB.
+            The full rows written to LanceDB.
         """
         if extract:
             if not contents:
@@ -437,18 +568,9 @@ class LanceDSPyMemoryStore:
 
             extractor = MemoryExtractor(signature=self._extraction_signature)
             with dspy.context(lm=self._extraction_lm):
-                extracted = cast(
-                    list[tuple[str, MemoryType | str]],
-                    extractor(messages=contents).memories,
+                extracted = self._normalize_extracted_memories(
+                    cast(list[Any], extractor(messages=contents).memories)
                 )
-
-            seen_contents: set[str] = set()
-            deduplicated: list[tuple[str, MemoryType | str]] = []
-            for content_val, inferred_type in extracted:
-                if content_val not in seen_contents:
-                    seen_contents.add(content_val)
-                    deduplicated.append((content_val, inferred_type))
-            extracted = deduplicated
 
             stored = [
                 self.create_memory(
@@ -461,15 +583,16 @@ class LanceDSPyMemoryStore:
                         if memory_type is not None
                         else inferred_type
                     ),
-                    metadata=metadata,
+                    metadata=self._merge_metadata(metadata, item_metadata),
+                    scope=scope,
                 )
-                for content, inferred_type in extracted
+                for content, inferred_type, item_metadata in extracted
             ]
             return self._without_vectors(stored)
 
         if not contents or len(contents) != 1:
             raise ValueError(
-                "verbatim (extract=False) requires exactly one item in contents"
+                "verbatim storage (extract=False) requires exactly one item in contents"
             )
 
         row = self.create_memory(
@@ -483,6 +606,7 @@ class LanceDSPyMemoryStore:
                 else MemoryType.SEMANTIC
             ),
             metadata=metadata,
+            scope=scope,
         )
         return self._without_vectors([row])
 
@@ -495,6 +619,7 @@ class LanceDSPyMemoryStore:
         conversation_id: str = "",
         memory_type: MemoryType | str = MemoryType.SEMANTIC,
         metadata: dict[str, Any] | None = None,
+        scope: dict[str, Any] | None = None,
     ) -> Memory:
         row = self._build_memory_row(
             user_id=user_id,
@@ -503,6 +628,7 @@ class LanceDSPyMemoryStore:
             conversation_id=conversation_id,
             memory_type=memory_type,
             metadata=metadata,
+            scope=scope,
         )
         self.table.add([row])
         return self._to_memory(row)
@@ -532,6 +658,8 @@ class LanceDSPyMemoryStore:
         session_id: str | None = None,
         conversation_id: str | None = None,
         memory_type: MemoryType | str | None = None,
+        scope: dict[str, Any] | None = None,
+        metadata_filter: dict[str, Any] | None = None,
         limit: int = 5,
         use_reranker: bool = False,
         min_relevance_score: float | None = None,
@@ -553,13 +681,19 @@ class LanceDSPyMemoryStore:
             self.table.search(self._embed(query), vector_column_name="vector"),
         )
 
+        fetch_limit = limit * self.rerank_limit_multiplier
+        if scope or metadata_filter:
+            fetch_limit *= 10
+
         if self.reranker is not None and use_reranker:
             builder = builder.rerank(self.reranker, query_string=query)
-            fetch_limit = limit * self.rerank_limit_multiplier
-        else:
-            fetch_limit = limit * self.rerank_limit_multiplier
 
         results = builder.where(" AND ".join(filters)).limit(fetch_limit).to_list()
+        results = self._filter_rows_by_json_fields(
+            [dict(row) for row in results],
+            scope=scope,
+            metadata_filter=metadata_filter,
+        )
         results = self._filter_by_relevance(results, min_relevance_score)
 
         results = results[:limit]
@@ -576,15 +710,15 @@ class LanceDSPyMemoryStore:
             )
             return
 
+        metadata, scope = self._split_metadata_scope(old_record.get("metadata"))
         new_row = self._build_memory_row(
             user_id=old_record["user_id"],
             content=content,
             session_id=old_record.get("session_id", ""),
             conversation_id=old_record.get("conversation_id", ""),
             memory_type=old_record.get("memory_type", "semantic"),
-            metadata=json.loads(old_record.get("metadata", "{}"))
-            if isinstance(old_record.get("metadata"), str)
-            else old_record.get("metadata"),
+            metadata=metadata,
+            scope=scope,
         )
         new_row["replaces_id"] = memory_id
 
@@ -602,6 +736,7 @@ class LanceDSPyMemoryStore:
         user_id: str,
         session_id: str,
         conversation_id: str,
+        scope: dict[str, Any] | None,
         metadata: dict[str, Any],
         skip_threshold: float,
         reconciler: MemoryReconciler,
@@ -623,12 +758,17 @@ class LanceDSPyMemoryStore:
                 else None
             ),
         )
+        candidate_limit = self._UPSERT_CANDIDATE_LIMIT
+        fetch_limit = candidate_limit * (10 if scope else 1)
         candidates = (
             self.table.search(self._embed(content), vector_column_name="vector")
             .where(" AND ".join(filters))
-            .limit(self._UPSERT_CANDIDATE_LIMIT)
+            .limit(fetch_limit)
             .to_list()
         )
+        candidates = self._filter_rows_by_json_fields(
+            [dict(row) for row in candidates], scope=scope
+        )[:candidate_limit]
 
         if candidates:
             nearest_distance = float(candidates[0].get("_distance", 1.0))
@@ -647,6 +787,7 @@ class LanceDSPyMemoryStore:
                     user_id=user_id,
                     session_id=session_id,
                     conversation_id=conversation_id,
+                    scope=dict(scope or {}),
                     metadata=metadata,
                     existing_row=self._without_vectors([dict(candidates[0])])[0],
                 )
@@ -680,23 +821,25 @@ class LanceDSPyMemoryStore:
             user_id=user_id,
             session_id=session_id,
             conversation_id=conversation_id,
+            scope=dict(scope or {}),
             metadata=metadata,
         )
 
     def _reconcile_batch_parallel(
         self,
-        extracted: list[tuple[str, MemoryType | str]],
+        extracted: list[tuple[str, MemoryType | str, dict[str, Any]]],
         reconciler: MemoryReconciler,
         user_id: str,
         session_id: str,
         conversation_id: str,
         memory_type: MemoryType | str | None,
-        metadata: dict[str, Any],
+        scope: dict[str, Any] | None,
+        metadata: dict[str, Any] | None,
         skip_threshold: float,
         num_threads: int,
     ) -> list[PendingReconciliation]:
         exec_pairs: list[tuple[Any, dspy.Example]] = []
-        for content, inferred_type in extracted:
+        for content, inferred_type, item_metadata in extracted:
             module = _SingleMemoryReconciler(
                 store=self,
                 reconciler=reconciler,
@@ -709,13 +852,15 @@ class LanceDSPyMemoryStore:
                 user_id=user_id,
                 session_id=session_id,
                 conversation_id=conversation_id,
-                metadata=metadata,
+                scope=dict(scope or {}),
+                metadata=self._merge_metadata(metadata, item_metadata),
             ).with_inputs(
                 "content",
                 "inferred_type",
                 "user_id",
                 "session_id",
                 "conversation_id",
+                "scope",
                 "metadata",
             )
             exec_pairs.append((module, example))
@@ -764,6 +909,7 @@ class LanceDSPyMemoryStore:
                         conversation_id=p.conversation_id,
                         memory_type=p.inferred_type,
                         metadata=p.metadata,
+                        scope=p.scope,
                     )
                 )
         return results
@@ -778,81 +924,22 @@ class LanceDSPyMemoryStore:
         extract: bool = True,
         memory_type: MemoryType | str | None = None,
         metadata: dict[str, Any] | None = None,
+        scope: dict[str, Any] | None = None,
         similarity_threshold: float = 0.85,
         skip_threshold: float = 0.85,
         use_reconciler: bool = True,
         num_threads: int = 4,
     ) -> Memories:
-        """Batch upsert — insert, update, or skip memories based on semantic
-        similarity.  Mirrors :meth:`create_memories` but uses
-        :meth:`upsert_memory` under the hood.
-
-        When *extract* is ``True`` (default), a DSPy Signature extracts
-        salient memories from the conversation turn and each extracted
-        memory is independently upserted.
-
-        When *extract* is ``False``, *contents* must contain exactly one
-        item which is upserted verbatim.
-
-        Parameters
-        ----------
-        user_id : str
-            User these memories belong to.
-        contents : list[dict[str, str]] | None
-            A conversation turn in ``{"role": ..., "content": ...}`` format.
-            Required when *extract* is ``True``.
-        session_id : str
-            Optional session scope for matching.
-        conversation_id : str
-            Optional conversation scope for matching.
-        extract : bool
-            When ``True``, use DSPy extraction to pull out individual
-            memories from the conversation text.
-        memory_type : MemoryType | str | None
-            Force a specific category.  ``None`` lets the LLM choose when
-            extracting; falls back to ``MemoryType.SEMANTIC`` otherwise.
-        metadata : dict[str, Any] | None
-            Structured data attached to new rows (ignored on update).
-        similarity_threshold : float
-            Cosine similarity threshold forwarded to :meth:`upsert_memory`.
-            Default ``0.85``.
-        skip_threshold : float
-            Cosine similarity threshold at which near-duplicate memories are
-            skipped rather than updated or created.  When a candidate's
-            similarity meets this threshold and the new content is not
-            genuinely richer, the upsert is a no-op.  Default ``0.92``.
-        use_reconciler : bool
-            When ``True`` (default), extracted semantic memories are reconciled
-            against existing candidates via an LLM-based :class:`MemoryReconciler`
-            before any write. Set to ``False`` to skip the LLM and use the fast
-            heuristic fallback.
-        num_threads : int
-            Number of concurrent threads for parallel reconciliation.
-            Default ``4``.  Set to ``1`` to run sequentially.
-
-        Returns
-        -------
-        Memories
-            The resulting rows.
-        """
+        """Batch upsert: insert, update, or skip memories based on semantic similarity."""
         if extract:
             if not contents:
                 raise ValueError("contents is required when extract=True")
 
             extractor = MemoryExtractor(signature=self._extraction_signature)
             with dspy.context(lm=self._extraction_lm):
-                extracted = cast(
-                    list[tuple[str, MemoryType | str]],
-                    extractor(messages=contents).memories,
+                extracted = self._normalize_extracted_memories(
+                    cast(list[Any], extractor(messages=contents).memories)
                 )
-
-            seen_contents: set[str] = set()
-            deduplicated: list[tuple[str, MemoryType | str]] = []
-            for content_val, inferred_type in extracted:
-                if content_val not in seen_contents:
-                    seen_contents.add(content_val)
-                    deduplicated.append((content_val, inferred_type))
-            extracted = deduplicated
 
             if use_reconciler:
                 reconciler = MemoryReconciler()
@@ -863,13 +950,13 @@ class LanceDSPyMemoryStore:
                     session_id=session_id,
                     conversation_id=conversation_id,
                     memory_type=memory_type,
-                    metadata=metadata or {},
+                    scope=scope,
+                    metadata=metadata,
                     skip_threshold=skip_threshold,
                     num_threads=num_threads,
                 )
                 return self._apply_reconciliations(pending)
 
-            # Fast fallback: delegate each extracted memory to upsert_memory
             stored = [
                 self.upsert_memory(
                     user_id=user_id,
@@ -881,18 +968,19 @@ class LanceDSPyMemoryStore:
                         if memory_type is not None
                         else inferred_type
                     ),
-                    metadata=metadata,
+                    metadata=self._merge_metadata(metadata, item_metadata),
+                    scope=scope,
                     similarity_threshold=similarity_threshold,
                     skip_threshold=skip_threshold,
                     use_reconciler=False,
                 )
-                for content, inferred_type in extracted
+                for content, inferred_type, item_metadata in extracted
             ]
-            return stored  # upsert_memory already strips vectors
+            return stored
 
         if not contents or len(contents) != 1:
             raise ValueError(
-                "verbatim (extract=False) requires exactly one item in contents"
+                "verbatim upsert (extract=False) requires exactly one item in contents"
             )
 
         row = self.upsert_memory(
@@ -906,6 +994,7 @@ class LanceDSPyMemoryStore:
                 else MemoryType.SEMANTIC
             ),
             metadata=metadata,
+            scope=scope,
             similarity_threshold=similarity_threshold,
             skip_threshold=skip_threshold,
             use_reconciler=use_reconciler,
@@ -921,56 +1010,12 @@ class LanceDSPyMemoryStore:
         conversation_id: str = "",
         memory_type: MemoryType | str = MemoryType.SEMANTIC,
         metadata: dict[str, Any] | None = None,
+        scope: dict[str, Any] | None = None,
         similarity_threshold: float = 0.85,
         skip_threshold: float = 0.85,
         use_reconciler: bool = True,
     ) -> Memory:
-        """Insert or update a memory based on semantic similarity.
-
-        Three-way decision:
-
-        1. **Exact match** — If a memory with the same *content* string
-           already exists for this user, skip the write and return the
-           existing row unchanged (no-op).
-        2. **Semantic match** — If no exact match but one of the nearest
-           scoped candidates is judged to represent the same semantic fact,
-           update that memory in place with the refined or corrected content.
-        3. **No match** — No existing memory is close enough; insert a new
-           row.
-
-        Parameters
-        ----------
-        user_id : str
-            User the memory belongs to.
-        content : str
-            New (or updated) memory text.
-        session_id : str
-            Optional session scope for the match.
-        conversation_id : str
-            Optional conversation scope for the match.
-        memory_type : MemoryType | str
-            Category for the memory.  Only used when creating new rows.
-        metadata : dict[str, Any] | None
-            Bag of structured data.  Only used when creating new rows.
-        similarity_threshold : float
-            Minimum cosine similarity (0‑1) to consider two memories
-            semantically equivalent.  Default ``0.85``.
-        skip_threshold : float
-            Cosine similarity threshold at which near-duplicate memories are
-            skipped rather than updated or created.  When a candidate's
-            similarity meets this threshold and the new content is not
-            genuinely richer, the upsert is a no-op.  Default ``0.92``.
-        use_reconciler : bool
-            When ``True`` (default) and the memory type is ``"semantic"``,
-            candidates are fed to an LLM-based :class:`MemoryReconciler` to
-            decide whether to keep, update, or create. Set to ``False`` to
-            use the fast heuristic fallback instead.
-
-        Returns
-        -------
-        Memory
-            The resulting memory row.
-        """
+        """Insert or update a memory based on semantic similarity."""
         resolved_type = self._memory_type_value(memory_type)
         candidate_limit = self._UPSERT_CANDIDATE_LIMIT
 
@@ -982,12 +1027,16 @@ class LanceDSPyMemoryStore:
                 resolved_type if resolved_type == MemoryType.SEMANTIC.value else None
             ),
         )
+        fetch_limit = candidate_limit * (10 if scope else 1)
         results = (
             self.table.search(self._embed(content), vector_column_name="vector")
             .where(" AND ".join(filters))
-            .limit(candidate_limit)
+            .limit(fetch_limit)
             .to_list()
         )
+        results = self._filter_rows_by_json_fields(
+            [dict(row) for row in results], scope=scope
+        )[:candidate_limit]
 
         if results:
             if resolved_type == MemoryType.SEMANTIC.value:
@@ -1077,7 +1126,6 @@ class LanceDSPyMemoryStore:
                     )
                     return self._without_vectors([dict(updated[0])])[0]
 
-        # --- No match → create ---
         return self._without_vectors(
             [
                 self.create_memory(
@@ -1087,6 +1135,7 @@ class LanceDSPyMemoryStore:
                     conversation_id=conversation_id,
                     memory_type=memory_type,
                     metadata=metadata,
+                    scope=scope,
                 )
             ]
         )[0]
@@ -1102,6 +1151,8 @@ class LanceDSPyMemoryStore:
         session_id: str = "",
         conversation_id: str = "",
         memory_type: MemoryType | str | None = None,
+        scope: dict[str, Any] | None = None,
+        metadata_filter: dict[str, Any] | None = None,
         similarity_threshold: float = 0.85,
         limit: int = 5,
     ) -> Memories:
@@ -1112,17 +1163,24 @@ class LanceDSPyMemoryStore:
             memory_type=self._memory_type_value(memory_type),
         )
 
+        fetch_limit = limit * (10 if (scope or metadata_filter) else 1)
         candidates = (
             self.table.search(self._embed(query), vector_column_name="vector")
             .where(" AND ".join(filters))
-            .limit(limit)
+            .limit(fetch_limit)
             .to_list()
         )
 
         if not candidates:
             return []
 
-        results = self._filter_by_relevance(candidates, min_score=similarity_threshold)
+        results = self._filter_rows_by_json_fields(
+            [dict(row) for row in candidates],
+            scope=scope,
+            metadata_filter=metadata_filter,
+        )
+        results = self._filter_by_relevance(results, min_score=similarity_threshold)
+        results = results[:limit]
 
         if not results:
             return []
@@ -1144,11 +1202,13 @@ class LanceDSPyMemoryStore:
         conversation_id: str = "",
         extract: bool = True,
         metadata: dict[str, Any] | None = None,
+        scope: dict[str, Any] | None = None,
+        metadata_filter: dict[str, Any] | None = None,
         similarity_threshold: float = 0.85,
         skip_threshold: float = 0.85,
         use_reconciler: bool = True,
     ) -> tuple[Memories, Memories]:
-        """Extract and process memory operations (create/update/delete) from a conversation.
+        """Extract and process memory operations (create/update/delete) from conversation.
 
         Returns a tuple of (created_or_updated_memories, deleted_memories).
         """
@@ -1192,14 +1252,20 @@ class LanceDSPyMemoryStore:
                             " AND ".join(exact_filters)
                             + f" AND content = '{op.content}'"
                         )
-                        .limit(1)
+                        .limit(10 if (scope or metadata_filter) else 1)
                         .to_list()
                     )
+                    exact_results = self._filter_rows_by_json_fields(
+                        [dict(row) for row in exact_results],
+                        scope=scope,
+                        metadata_filter=metadata_filter,
+                    )
                     if exact_results:
-                        for row in exact_results:
+                        for row in exact_results[:1]:
                             memory_id = str(row["id"])
                             self.table.update(
-                                where=f"id = '{memory_id}'", values={"is_active": False}
+                                where=f"id = '{memory_id}'",
+                                values={"is_active": False},
                             )
                             deleted.append(self._to_memory(dict(row)))
                         continue
@@ -1209,35 +1275,33 @@ class LanceDSPyMemoryStore:
                     query=search_query,
                     session_id=session_id,
                     conversation_id=conversation_id,
-                    memory_type=op.memory_type or None,
+                    memory_type=self._memory_type_value(op.memory_type),
+                    scope=scope,
+                    metadata_filter=metadata_filter,
                     similarity_threshold=similarity_threshold,
-                    limit=3,
+                    limit=1,
                 )
                 deleted.extend(removed)
+                continue
 
-            elif action == "update":
-                result = self.upsert_memory(
-                    user_id=user_id,
-                    content=op.content,
-                    session_id=session_id,
-                    conversation_id=conversation_id,
-                    memory_type=op.memory_type or MemoryType.SEMANTIC,
-                    metadata=metadata,
-                    similarity_threshold=similarity_threshold,
-                    skip_threshold=skip_threshold,
-                    use_reconciler=use_reconciler,
+            if action in ("create", "update") and op.content:
+                created_or_updated.append(
+                    self.upsert_memory(
+                        user_id=user_id,
+                        session_id=session_id,
+                        conversation_id=conversation_id,
+                        content=op.content,
+                        memory_type=(
+                            memory_type_from_string(op.memory_type)
+                            if op.memory_type
+                            else MemoryType.SEMANTIC
+                        ),
+                        metadata=metadata,
+                        scope=scope,
+                        similarity_threshold=similarity_threshold,
+                        skip_threshold=skip_threshold,
+                        use_reconciler=use_reconciler,
+                    )
                 )
-                created_or_updated.append(result)
 
-            elif action == "create":
-                result = self.create_memory(
-                    user_id=user_id,
-                    content=op.content,
-                    session_id=session_id,
-                    conversation_id=conversation_id,
-                    memory_type=op.memory_type or MemoryType.SEMANTIC,
-                    metadata=metadata,
-                )
-                created_or_updated.append(result)
-
-        return (created_or_updated, deleted)
+        return created_or_updated, deleted
