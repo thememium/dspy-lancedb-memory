@@ -113,12 +113,18 @@ class MemoryExtractor(dspy.Module):
         if not isinstance(items, list):
             items = [items]
 
-        cleaned: list[tuple[str, MemoryType | str]] = []
+        cleaned: list[tuple[str, MemoryType | str, dict]] = []
         for item in items:
             content = item.content.strip()
             if not content:
                 continue
-            cleaned.append((content, memory_type_from_string(item.type)))
+            cleaned.append(
+                (
+                    content,
+                    memory_type_from_string(item.type),
+                    dict(getattr(item, "metadata", {}) or {}),
+                )
+            )
 
         return dspy.Prediction(memories=cleaned)
 
