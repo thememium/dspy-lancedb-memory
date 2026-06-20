@@ -4,7 +4,7 @@ from dataclasses import dataclass, field
 from enum import Enum
 from typing import Any
 
-from pydantic import BaseModel
+from pydantic import BaseModel, ConfigDict
 
 
 class MemoryType(Enum):
@@ -35,6 +35,23 @@ class MemoryType(Enum):
             if member.value == value:
                 return member
         return None
+
+
+class Scope(BaseModel):
+    """Typed helper for arbitrary custom memory ownership/query dimensions."""
+
+    model_config = ConfigDict(extra="allow")
+
+    def __init__(self, **data: Any) -> None:
+        super().__init__(**data)
+
+    def to_dict(self) -> dict[str, Any]:
+        """Return scope fields as a plain dict."""
+        return self.model_dump(mode="json")
+
+
+ScopeLike = Scope | BaseModel | dict[str, Any]
+"""Accepted input type for custom memory scope values."""
 
 
 class MemoryItem(BaseModel):
@@ -92,7 +109,7 @@ class Memory(BaseModel):
     """Arbitrary structured data attached at write time."""
 
     scope: dict[str, Any] = {}
-    """Custom ownership/query dimensions, e.g. workspace_id, project_id, agent_id."""
+    """Custom ownership/query dimensions."""
 
     replaces_id: str | None = None
     """ID of the memory this record replaces (append-only history chain). ``None`` for original memories."""
