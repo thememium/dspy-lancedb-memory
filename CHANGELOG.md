@@ -1,5 +1,17 @@
 # Changelog
 
+## v0.1.10 (2026-06-20)
+
+[Compare changes](https://github.com/thememium/dspy-lancedb-memory/compare/v0.1.9...v0.1.10)
+
+### 🩹 Fixes
+
+- parallel upsert (#5) (#5) ([7ae17e4](https://github.com/thememium/dspy-lancedb-memory/commit/7ae17e4cf01c8e1f0d2cc5ce58b287964ac6c3c8))
+
+### Contributors
+
+- Edward Boswell <thememium@gmail.com>
+
 ## v0.1.9 (2026-06-15)
 
 [Compare changes](https://github.com/thememium/dspy-lancedb-memory/compare/v0.1.8...v0.1.9)
