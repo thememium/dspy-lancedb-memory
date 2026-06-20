@@ -4,7 +4,9 @@ from types import SimpleNamespace
 
 import dspy
 import pytest
+from pydantic import BaseModel
 
+from dspy_lancedb_memory.models import Scope
 from dspy_lancedb_memory.store import LanceDSPyMemoryStore
 
 EMBEDDINGS: dict[str, list[float]] = {
@@ -1453,23 +1455,23 @@ def test_search_memories_filters_by_scope(store: LanceDSPyMemoryStore) -> None:
         user_id="user-1",
         content="favorite food is pizza",
         memory_type="semantic",
-        scope={"workspace_id": "workspace-a", "project_id": "alpha"},
+        scope={"tenant": "tenant-a", "repo": "alpha"},
     )
     scoped = store.create_memory(
         user_id="user-1",
         content="favorite food is pizza",
         memory_type="semantic",
-        scope={"workspace_id": "workspace-a", "project_id": "beta"},
+        scope={"tenant": "tenant-a", "repo": "beta"},
     )
 
     results = store.search_memories(
         user_id="user-1",
         query="what food do I like",
-        scope={"project_id": "beta"},
+        scope={"repo": "beta"},
     )
 
     assert [r.id for r in results] == [scoped.id]
-    assert results[0].scope == {"workspace_id": "workspace-a", "project_id": "beta"}
+    assert results[0].scope == {"tenant": "tenant-a", "repo": "beta"}
 
 
 def test_upsert_memory_respects_scope_boundaries(store: LanceDSPyMemoryStore) -> None:
@@ -1477,7 +1479,7 @@ def test_upsert_memory_respects_scope_boundaries(store: LanceDSPyMemoryStore) ->
         user_id="user-1",
         content="favorite food is pizza",
         memory_type="semantic",
-        scope={"project_id": "alpha"},
+        scope={"tenant": "tenant-a"},
         use_reconciler=False,
     )
 
@@ -1567,3 +1569,204 @@ def test_create_memories_merges_extracted_metadata(
         "confidence": 0.9,
     }
     assert results[0].scope == {"project_id": "alpha"}
+
+
+# ---------------------------------------------------------------------------
+# Developer-experience helpers
+# ---------------------------------------------------------------------------
+
+
+def test_scope_model_is_accepted_by_search(store: LanceDSPyMemoryStore) -> None:
+    scoped = store.create_memory(
+        user_id="user-1",
+        content="favorite food is pizza",
+        memory_type="semantic",
+        scope=Scope(tenant="tenant-a", repo="memory-sdk", environment="prod"),
+    )
+
+    results = store.search_memories(
+        user_id="user-1",
+        query="what food do I like",
+        scope=Scope(repo="memory-sdk", environment="prod"),
+    )
+
+    assert [r.id for r in results] == [scoped.id]
+    assert results[0].scope == {
+        "tenant": "tenant-a",
+        "repo": "memory-sdk",
+        "environment": "prod",
+    }
+
+
+def test_custom_pydantic_scope_model_is_accepted(
+    store: LanceDSPyMemoryStore,
+) -> None:
+    class DeploymentScope(BaseModel):
+        tenant: str
+        repo: str
+        environment: str
+
+    scoped = store.create_memory(
+        user_id="user-1",
+        content="favorite food is pizza",
+        memory_type="semantic",
+        scope=DeploymentScope(
+            tenant="tenant-a",
+            repo="memory-sdk",
+            environment="prod",
+        ),
+    )
+
+    results = store.search_memories(
+        user_id="user-1",
+        query="what food do I like",
+        scope=DeploymentScope(
+            tenant="tenant-a",
+            repo="memory-sdk",
+            environment="prod",
+        ),
+    )
+
+    assert [r.id for r in results] == [scoped.id]
+    assert results[0].scope == {
+        "tenant": "tenant-a",
+        "repo": "memory-sdk",
+        "environment": "prod",
+    }
+
+
+def test_bound_store_applies_context(store: LanceDSPyMemoryStore) -> None:
+    bound = store.with_scope(
+        user_id="user-1",
+        session_id="session-1",
+        scope={"tenant": "tenant-a", "repo": "memory-sdk"},
+    )
+    memory = bound.create_memory(
+        content="favorite food is pizza",
+        memory_type="semantic",
+    )
+
+    results = bound.search_memories(query="what food do I like")
+
+    assert [r.id for r in results] == [memory.id]
+    assert results[0].session_id == "session-1"
+    assert results[0].scope == {"tenant": "tenant-a", "repo": "memory-sdk"}
+
+
+def test_list_and_get_memory_with_filters(store: LanceDSPyMemoryStore) -> None:
+    memory = store.create_memory(
+        user_id="user-1",
+        content="favorite food is pizza",
+        memory_type="semantic",
+        metadata={"source": "doc"},
+        scope={"tenant": "tenant-a"},
+    )
+    store.create_memory(
+        user_id="user-1",
+        content="favorite color is blue",
+        memory_type="semantic",
+        metadata={"source": "chat"},
+        scope={"tenant": "tenant-b"},
+    )
+
+    listed = store.list_memories(
+        user_id="user-1",
+        scope={"tenant": "tenant-a"},
+        metadata_filter={"source": "doc"},
+    )
+    fetched = store.get_memory(memory_id=memory.id)
+
+    assert [r.id for r in listed] == [memory.id]
+    assert fetched is not None
+    assert fetched.id == memory.id
+
+
+def test_update_metadata_and_scope_create_history(store: LanceDSPyMemoryStore) -> None:
+    memory = store.create_memory(
+        user_id="user-1",
+        content="favorite food is pizza",
+        memory_type="semantic",
+        metadata={"source": "chat"},
+        scope={"tenant": "tenant-a"},
+    )
+
+    with_metadata = store.update_memory_metadata(
+        memory_id=memory.id,
+        metadata={"priority": "high"},
+    )
+    assert with_metadata is not None
+    with_scope = store.update_memory_scope(
+        memory_id=with_metadata.id,
+        scope={"region": "us-central"},
+    )
+
+    assert with_scope is not None
+    assert with_scope.metadata == {"source": "chat", "priority": "high"}
+    assert with_scope.scope == {"tenant": "tenant-a", "region": "us-central"}
+
+    history = store.get_memory_history(memory_id=with_scope.id)
+    assert [row.content for row in history] == [
+        "favorite food is pizza",
+        "favorite food is pizza",
+        "favorite food is pizza",
+    ]
+    assert history[0].id == with_scope.id
+    assert history[-1].id == memory.id
+
+
+def test_metadata_filter_operators(store: LanceDSPyMemoryStore) -> None:
+    store.create_memory(
+        user_id="user-1",
+        content="favorite food is pizza",
+        memory_type="semantic",
+        metadata={"priority": "low", "confidence": 0.4, "tags": ["chat"]},
+    )
+    target = store.create_memory(
+        user_id="user-1",
+        content="favorite food is pizza",
+        memory_type="semantic",
+        metadata={
+            "priority": "high",
+            "confidence": 0.9,
+            "tags": ["doc", "profile"],
+        },
+    )
+
+    results = store.search_memories(
+        user_id="user-1",
+        query="what food do I like",
+        metadata_filter={
+            "priority": {"in": ["high", "urgent"]},
+            "confidence": {"gte": 0.8},
+            "tags": {"contains": "profile"},
+        },
+    )
+
+    assert [r.id for r in results] == [target.id]
+
+
+def test_reserved_scope_metadata_key_is_rejected(store: LanceDSPyMemoryStore) -> None:
+    with pytest.raises(ValueError, match="reserved"):
+        store.create_memory(
+            user_id="user-1",
+            content="favorite food is pizza",
+            memory_type="semantic",
+            metadata={"_scope": {"project_id": "alpha"}},
+        )
+
+
+def test_filter_values_with_quotes_do_not_break_queries(
+    store: LanceDSPyMemoryStore,
+) -> None:
+    memory = store.create_memory(
+        user_id="user'1",
+        content="favorite food is pizza",
+        memory_type="semantic",
+    )
+
+    results = store.search_memories(
+        user_id="user'1",
+        query="what food do I like",
+    )
+
+    assert [r.id for r in results] == [memory.id]

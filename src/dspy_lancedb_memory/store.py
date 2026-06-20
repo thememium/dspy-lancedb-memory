@@ -11,6 +11,7 @@ import lancedb
 import pyarrow as pa
 from lancedb.query import LanceVectorQueryBuilder
 from lancedb.rerankers import Reranker
+from pydantic import BaseModel
 
 from .extraction import (
     ExtractMemory,
@@ -25,6 +26,8 @@ from .models import (
     MemoryType,
     PendingReconciliation,
     ReconciledMemory,
+    Scope,
+    ScopeLike,
     memory_type_from_string,
 )
 
@@ -183,6 +186,20 @@ class LanceDSPyMemoryStore:
     _SCOPE_METADATA_KEY = "_scope"
 
     @staticmethod
+    def _scope_dict(scope: ScopeLike | None) -> dict[str, Any]:
+        if scope is None:
+            return {}
+        if isinstance(scope, Scope):
+            return scope.to_dict()
+        if isinstance(scope, BaseModel):
+            return scope.model_dump(mode="json")
+        return dict(scope)
+
+    @staticmethod
+    def _escape_filter_value(value: str) -> str:
+        return value.replace("'", "''")
+
+    @staticmethod
     def _json_dict(value: Any) -> dict[str, Any]:
         if isinstance(value, dict):
             return dict(value)
@@ -208,16 +225,63 @@ class LanceDSPyMemoryStore:
     def _pack_metadata(
         cls,
         metadata: dict[str, Any] | None,
-        scope: dict[str, Any] | None,
+        scope: ScopeLike | None,
     ) -> str:
         packed = dict(metadata or {})
-        if scope:
-            packed[cls._SCOPE_METADATA_KEY] = dict(scope)
+        if cls._SCOPE_METADATA_KEY in packed:
+            raise ValueError(
+                f"metadata key {cls._SCOPE_METADATA_KEY!r} is reserved; use scope= instead"
+            )
+        scope_dict = cls._scope_dict(scope)
+        if scope_dict:
+            packed[cls._SCOPE_METADATA_KEY] = scope_dict
         return json.dumps(packed)
 
     @staticmethod
     def _matches_filter(value: Any, expected: Any) -> bool:
         if isinstance(expected, dict):
+            operator_keys = {
+                "eq",
+                "neq",
+                "in",
+                "contains",
+                "gt",
+                "gte",
+                "lt",
+                "lte",
+                "exists",
+            }
+            if any(key in operator_keys for key in expected):
+                for operator, operand in expected.items():
+                    if operator == "eq" and value != operand:
+                        return False
+                    if operator == "neq" and value == operand:
+                        return False
+                    if operator == "in" and value not in operand:
+                        return False
+                    if operator == "contains":
+                        if isinstance(value, (list, tuple, set)):
+                            if operand not in value:
+                                return False
+                        elif isinstance(value, str):
+                            if str(operand) not in value:
+                                return False
+                        else:
+                            return False
+                    if operator == "gt" and not (value > operand):
+                        return False
+                    if operator == "gte" and not (value >= operand):
+                        return False
+                    if operator == "lt" and not (value < operand):
+                        return False
+                    if operator == "lte" and not (value <= operand):
+                        return False
+                    if operator == "exists" and (
+                        (value is not None) is not bool(operand)
+                    ):
+                        return False
+                return True
+
             if not isinstance(value, dict):
                 return False
             return all(
@@ -234,11 +298,12 @@ class LanceDSPyMemoryStore:
         cls,
         row: dict[str, Any],
         *,
-        scope: dict[str, Any] | None = None,
+        scope: ScopeLike | None = None,
         metadata_filter: dict[str, Any] | None = None,
     ) -> bool:
         metadata, row_scope = cls._split_metadata_scope(row.get("metadata"))
-        if scope and not cls._matches_filter(row_scope, scope):
+        scope_filter = cls._scope_dict(scope)
+        if scope_filter and not cls._matches_filter(row_scope, scope_filter):
             return False
         if metadata_filter and not cls._matches_filter(metadata, metadata_filter):
             return False
@@ -249,39 +314,45 @@ class LanceDSPyMemoryStore:
         cls,
         rows: list[dict[str, Any]],
         *,
-        scope: dict[str, Any] | None = None,
+        scope: ScopeLike | None = None,
         metadata_filter: dict[str, Any] | None = None,
     ) -> list[dict[str, Any]]:
-        if not scope and not metadata_filter:
+        scope_filter = cls._scope_dict(scope)
+        if not scope_filter and not metadata_filter:
             return rows
         return [
             row
             for row in rows
             if cls._row_matches_json_filters(
-                row, scope=scope, metadata_filter=metadata_filter
+                row, scope=scope_filter, metadata_filter=metadata_filter
             )
         ]
 
-    @staticmethod
+    @classmethod
     def _build_filters(
+        cls,
         *,
         user_id: str,
         session_id: str,
         conversation_id: str,
         memory_type: str | None = None,
+        active_only: bool = True,
     ) -> list[str]:
-        filters = [f"user_id = '{user_id}'"]
+        filters = [f"user_id = '{cls._escape_filter_value(user_id)}'"]
 
         if session_id:
-            filters.append(f"session_id = '{session_id}'")
+            filters.append(f"session_id = '{cls._escape_filter_value(session_id)}'")
 
         if conversation_id:
-            filters.append(f"conversation_id = '{conversation_id}'")
+            filters.append(
+                f"conversation_id = '{cls._escape_filter_value(conversation_id)}'"
+            )
 
         if memory_type:
-            filters.append(f"memory_type = '{memory_type}'")
+            filters.append(f"memory_type = '{cls._escape_filter_value(memory_type)}'")
 
-        filters.append("is_active = true")
+        if active_only:
+            filters.append("is_active = true")
 
         return filters
 
@@ -417,7 +488,7 @@ class LanceDSPyMemoryStore:
         conversation_id: str = "",
         memory_type: MemoryType | str,
         metadata: dict[str, Any] | None,
-        scope: dict[str, Any] | None = None,
+        scope: ScopeLike | None = None,
     ) -> dict[str, Any]:
         now = datetime.now(timezone.utc).isoformat()
         resolved_type = memory_type_from_string(memory_type)
@@ -518,6 +589,147 @@ class LanceDSPyMemoryStore:
             )
         return normalized
 
+    def with_scope(
+        self,
+        *,
+        user_id: str,
+        session_id: str = "",
+        conversation_id: str = "",
+        scope: ScopeLike | None = None,
+    ) -> "BoundMemoryStore":
+        return BoundMemoryStore(
+            self,
+            user_id=user_id,
+            session_id=session_id,
+            conversation_id=conversation_id,
+            scope=self._scope_dict(scope),
+        )
+
+    def get_memory(
+        self, *, memory_id: str, include_inactive: bool = False
+    ) -> Memory | None:
+        filters = [f"id = '{self._escape_filter_value(memory_id)}'"]
+        if not include_inactive:
+            filters.append("is_active = true")
+        rows = self.table.search().where(" AND ".join(filters)).limit(1).to_list()
+        if not rows:
+            return None
+        return self._to_memory(dict(rows[0]))
+
+    def list_memories(
+        self,
+        *,
+        user_id: str,
+        session_id: str | None = None,
+        conversation_id: str | None = None,
+        memory_type: MemoryType | str | None = None,
+        scope: ScopeLike | None = None,
+        metadata_filter: dict[str, Any] | None = None,
+        include_inactive: bool = False,
+        limit: int | None = None,
+    ) -> Memories:
+        filters = self._build_filters(
+            user_id=user_id,
+            session_id=session_id or "",
+            conversation_id=conversation_id or "",
+            memory_type=self._memory_type_value(memory_type),
+            active_only=not include_inactive,
+        )
+        query = self.table.search().where(" AND ".join(filters))
+        if limit is not None:
+            query = query.limit(limit * (10 if (scope or metadata_filter) else 1))
+        rows = [dict(row) for row in query.to_list()]
+        rows = self._filter_rows_by_json_fields(
+            rows,
+            scope=self._scope_dict(scope),
+            metadata_filter=metadata_filter,
+        )
+        if limit is not None:
+            rows = rows[:limit]
+        return self._without_vectors(rows)
+
+    def get_memory_history(self, *, memory_id: str) -> Memories:
+        rows = [dict(row) for row in self.table.search().to_list()]
+        by_id = {str(row["id"]): row for row in rows}
+        if memory_id not in by_id:
+            return []
+
+        chain_ids: list[str] = []
+        current_id: str | None = memory_id
+        while current_id and current_id in by_id and current_id not in chain_ids:
+            chain_ids.append(current_id)
+            replaces_id = by_id[current_id].get("replaces_id")
+            current_id = str(replaces_id) if replaces_id else None
+
+        changed = True
+        while changed:
+            changed = False
+            known = set(chain_ids)
+            for row_id, row in by_id.items():
+                if row_id not in known and row.get("replaces_id") in known:
+                    chain_ids.insert(0, row_id)
+                    changed = True
+
+        return self._without_vectors([by_id[row_id] for row_id in chain_ids])
+
+    def update_memory_metadata(
+        self,
+        *,
+        memory_id: str,
+        metadata: dict[str, Any],
+        merge: bool = True,
+    ) -> Memory | None:
+        old = self.get_memory(memory_id=memory_id)
+        if old is None:
+            return None
+        next_metadata = dict(old.metadata) if merge else {}
+        next_metadata.update(metadata)
+        new_row = self._build_memory_row(
+            user_id=old.user_id,
+            content=old.content,
+            session_id=old.session_id,
+            conversation_id=old.conversation_id,
+            memory_type=old.memory_type,
+            metadata=next_metadata,
+            scope=old.scope,
+        )
+        new_row["replaces_id"] = old.id
+        self.table.add([new_row])
+        self.table.update(
+            where=f"id = '{self._escape_filter_value(old.id)}'",
+            values={"is_active": False},
+        )
+        return self._to_memory(new_row)
+
+    def update_memory_scope(
+        self,
+        *,
+        memory_id: str,
+        scope: ScopeLike,
+        merge: bool = True,
+    ) -> Memory | None:
+        old = self.get_memory(memory_id=memory_id)
+        if old is None:
+            return None
+        next_scope = dict(old.scope) if merge else {}
+        next_scope.update(self._scope_dict(scope))
+        new_row = self._build_memory_row(
+            user_id=old.user_id,
+            content=old.content,
+            session_id=old.session_id,
+            conversation_id=old.conversation_id,
+            memory_type=old.memory_type,
+            metadata=old.metadata,
+            scope=next_scope,
+        )
+        new_row["replaces_id"] = old.id
+        self.table.add([new_row])
+        self.table.update(
+            where=f"id = '{self._escape_filter_value(old.id)}'",
+            values={"is_active": False},
+        )
+        return self._to_memory(new_row)
+
     def create_memories(
         self,
         *,
@@ -528,7 +740,7 @@ class LanceDSPyMemoryStore:
         extract: bool = True,
         memory_type: MemoryType | str | None = None,
         metadata: dict[str, Any] | None = None,
-        scope: dict[str, Any] | None = None,
+        scope: ScopeLike | None = None,
     ) -> Memories:
         """
         Store content for a user — either raw or extracted from conversation.
@@ -619,7 +831,7 @@ class LanceDSPyMemoryStore:
         conversation_id: str = "",
         memory_type: MemoryType | str = MemoryType.SEMANTIC,
         metadata: dict[str, Any] | None = None,
-        scope: dict[str, Any] | None = None,
+        scope: ScopeLike | None = None,
     ) -> Memory:
         row = self._build_memory_row(
             user_id=user_id,
@@ -658,7 +870,7 @@ class LanceDSPyMemoryStore:
         session_id: str | None = None,
         conversation_id: str | None = None,
         memory_type: MemoryType | str | None = None,
-        scope: dict[str, Any] | None = None,
+        scope: ScopeLike | None = None,
         metadata_filter: dict[str, Any] | None = None,
         limit: int = 5,
         use_reranker: bool = False,
@@ -736,7 +948,7 @@ class LanceDSPyMemoryStore:
         user_id: str,
         session_id: str,
         conversation_id: str,
-        scope: dict[str, Any] | None,
+        scope: ScopeLike | None,
         metadata: dict[str, Any],
         skip_threshold: float,
         reconciler: MemoryReconciler,
@@ -787,7 +999,7 @@ class LanceDSPyMemoryStore:
                     user_id=user_id,
                     session_id=session_id,
                     conversation_id=conversation_id,
-                    scope=dict(scope or {}),
+                    scope=self._scope_dict(scope),
                     metadata=metadata,
                     existing_row=self._without_vectors([dict(candidates[0])])[0],
                 )
@@ -821,7 +1033,7 @@ class LanceDSPyMemoryStore:
             user_id=user_id,
             session_id=session_id,
             conversation_id=conversation_id,
-            scope=dict(scope or {}),
+            scope=self._scope_dict(scope),
             metadata=metadata,
         )
 
@@ -833,7 +1045,7 @@ class LanceDSPyMemoryStore:
         session_id: str,
         conversation_id: str,
         memory_type: MemoryType | str | None,
-        scope: dict[str, Any] | None,
+        scope: ScopeLike | None,
         metadata: dict[str, Any] | None,
         skip_threshold: float,
         num_threads: int,
@@ -852,7 +1064,7 @@ class LanceDSPyMemoryStore:
                 user_id=user_id,
                 session_id=session_id,
                 conversation_id=conversation_id,
-                scope=dict(scope or {}),
+                scope=self._scope_dict(scope),
                 metadata=self._merge_metadata(metadata, item_metadata),
             ).with_inputs(
                 "content",
@@ -924,7 +1136,7 @@ class LanceDSPyMemoryStore:
         extract: bool = True,
         memory_type: MemoryType | str | None = None,
         metadata: dict[str, Any] | None = None,
-        scope: dict[str, Any] | None = None,
+        scope: ScopeLike | None = None,
         similarity_threshold: float = 0.85,
         skip_threshold: float = 0.85,
         use_reconciler: bool = True,
@@ -1010,7 +1222,7 @@ class LanceDSPyMemoryStore:
         conversation_id: str = "",
         memory_type: MemoryType | str = MemoryType.SEMANTIC,
         metadata: dict[str, Any] | None = None,
-        scope: dict[str, Any] | None = None,
+        scope: ScopeLike | None = None,
         similarity_threshold: float = 0.85,
         skip_threshold: float = 0.85,
         use_reconciler: bool = True,
@@ -1151,7 +1363,7 @@ class LanceDSPyMemoryStore:
         session_id: str = "",
         conversation_id: str = "",
         memory_type: MemoryType | str | None = None,
-        scope: dict[str, Any] | None = None,
+        scope: ScopeLike | None = None,
         metadata_filter: dict[str, Any] | None = None,
         similarity_threshold: float = 0.85,
         limit: int = 5,
@@ -1202,7 +1414,7 @@ class LanceDSPyMemoryStore:
         conversation_id: str = "",
         extract: bool = True,
         metadata: dict[str, Any] | None = None,
-        scope: dict[str, Any] | None = None,
+        scope: ScopeLike | None = None,
         metadata_filter: dict[str, Any] | None = None,
         similarity_threshold: float = 0.85,
         skip_threshold: float = 0.85,
@@ -1305,3 +1517,153 @@ class LanceDSPyMemoryStore:
                 )
 
         return created_or_updated, deleted
+
+
+class BoundMemoryStore:
+    """A convenience wrapper with user/session/conversation/scope pre-bound."""
+
+    def __init__(
+        self,
+        store: LanceDSPyMemoryStore,
+        *,
+        user_id: str,
+        session_id: str = "",
+        conversation_id: str = "",
+        scope: ScopeLike | None = None,
+    ) -> None:
+        self.store = store
+        self.user_id = user_id
+        self.session_id = session_id
+        self.conversation_id = conversation_id
+        self.scope = dict(scope or {})
+
+    def _scope(self, scope: ScopeLike | None = None) -> dict[str, Any]:
+        merged = dict(self.scope)
+        merged.update(self.store._scope_dict(scope))
+        return merged
+
+    def create_memory(
+        self,
+        *,
+        content: str,
+        scope: ScopeLike | None = None,
+        **kwargs: Any,
+    ) -> Memory:
+        return self.store.create_memory(
+            user_id=self.user_id,
+            session_id=kwargs.pop("session_id", self.session_id),
+            conversation_id=kwargs.pop("conversation_id", self.conversation_id),
+            content=content,
+            scope=self._scope(scope),
+            **kwargs,
+        )
+
+    def create_memories(
+        self,
+        *,
+        contents: list[dict[str, str]] | None = None,
+        scope: ScopeLike | None = None,
+        **kwargs: Any,
+    ) -> Memories:
+        return self.store.create_memories(
+            user_id=self.user_id,
+            session_id=kwargs.pop("session_id", self.session_id),
+            conversation_id=kwargs.pop("conversation_id", self.conversation_id),
+            contents=contents,
+            scope=self._scope(scope),
+            **kwargs,
+        )
+
+    def search_memories(
+        self,
+        *,
+        query: str,
+        scope: ScopeLike | None = None,
+        **kwargs: Any,
+    ) -> Memories:
+        return self.store.search_memories(
+            user_id=self.user_id,
+            session_id=kwargs.pop("session_id", self.session_id),
+            conversation_id=kwargs.pop("conversation_id", self.conversation_id),
+            query=query,
+            scope=self._scope(scope),
+            **kwargs,
+        )
+
+    def upsert_memory(
+        self,
+        *,
+        content: str,
+        scope: ScopeLike | None = None,
+        **kwargs: Any,
+    ) -> Memory:
+        return self.store.upsert_memory(
+            user_id=self.user_id,
+            session_id=kwargs.pop("session_id", self.session_id),
+            conversation_id=kwargs.pop("conversation_id", self.conversation_id),
+            content=content,
+            scope=self._scope(scope),
+            **kwargs,
+        )
+
+    def upsert_memories(
+        self,
+        *,
+        contents: list[dict[str, str]] | None = None,
+        scope: ScopeLike | None = None,
+        **kwargs: Any,
+    ) -> Memories:
+        return self.store.upsert_memories(
+            user_id=self.user_id,
+            session_id=kwargs.pop("session_id", self.session_id),
+            conversation_id=kwargs.pop("conversation_id", self.conversation_id),
+            contents=contents,
+            scope=self._scope(scope),
+            **kwargs,
+        )
+
+    def list_memories(
+        self,
+        *,
+        scope: ScopeLike | None = None,
+        **kwargs: Any,
+    ) -> Memories:
+        return self.store.list_memories(
+            user_id=self.user_id,
+            session_id=kwargs.pop("session_id", self.session_id),
+            conversation_id=kwargs.pop("conversation_id", self.conversation_id),
+            scope=self._scope(scope),
+            **kwargs,
+        )
+
+    def process_memories(
+        self,
+        *,
+        contents: list[dict[str, str]] | None = None,
+        scope: ScopeLike | None = None,
+        **kwargs: Any,
+    ) -> tuple[Memories, Memories]:
+        return self.store.process_memories(
+            user_id=self.user_id,
+            session_id=kwargs.pop("session_id", self.session_id),
+            conversation_id=kwargs.pop("conversation_id", self.conversation_id),
+            contents=contents,
+            scope=self._scope(scope),
+            **kwargs,
+        )
+
+    def delete_memories_by_search(
+        self,
+        *,
+        query: str,
+        scope: ScopeLike | None = None,
+        **kwargs: Any,
+    ) -> Memories:
+        return self.store.delete_memories_by_search(
+            user_id=self.user_id,
+            session_id=kwargs.pop("session_id", self.session_id),
+            conversation_id=kwargs.pop("conversation_id", self.conversation_id),
+            query=query,
+            scope=self._scope(scope),
+            **kwargs,
+        )
