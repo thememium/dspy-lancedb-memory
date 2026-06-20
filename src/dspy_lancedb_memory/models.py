@@ -38,10 +38,10 @@ class MemoryType(Enum):
 
 
 class MemoryItem(BaseModel):
-    """One extracted memory returned by the LLM."""
+    """One extracted memory returned by LLM."""
 
     content: str
-    """The memory text — a concise, self-contained fact, preference, or event."""
+    """The memory text — concise, self-contained fact, preference, or event."""
 
     type: str
     """
@@ -49,6 +49,9 @@ class MemoryItem(BaseModel):
 
     Must be one of: preference, semantic, episodic, procedural, summary, artifact.
     """
+
+    metadata: dict[str, Any] = {}
+    """Optional structured data attached to this extracted memory."""
 
 
 class Memory(BaseModel):
@@ -88,6 +91,9 @@ class Memory(BaseModel):
     metadata: dict[str, Any]
     """Arbitrary structured data attached at write time."""
 
+    scope: dict[str, Any] = {}
+    """Custom ownership/query dimensions, e.g. workspace_id, project_id, agent_id."""
+
     replaces_id: str | None = None
     """ID of the memory this record replaces (append-only history chain). ``None`` for original memories."""
 
@@ -124,7 +130,7 @@ class ReconciledMemory(BaseModel):
 
 @dataclass
 class PendingReconciliation:
-    """Holds a reconciliation decision until writes are applied.
+    """Holds reconciliation decision until writes are applied.
 
     Used by the two-phase parallel reconciliation pipeline:
     Phase 1 (parallel) populates this; Phase 2 (sequential) applies writes.
@@ -136,6 +142,7 @@ class PendingReconciliation:
     user_id: str
     session_id: str
     conversation_id: str
+    scope: dict[str, Any] = field(default_factory=dict)
     metadata: dict[str, Any] = field(default_factory=dict)
     existing_row: Memory | None = None
 
