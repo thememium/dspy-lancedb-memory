@@ -13,6 +13,7 @@ from .models import (
     MemoryOperation,
     MemoryOperations,
     MemoryType,
+    PendingReconciliation,
     ReconciledMemory,
 )
 from .reranking import LiteLLMReranker
@@ -30,6 +31,7 @@ __all__ = [
     "MemoryOperations",
     "MemoryReconciler",
     "MemoryType",
+    "PendingReconciliation",
     "ReconciledMemory",
     "memory",
 ]

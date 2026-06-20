@@ -23,6 +23,7 @@ from .models import (
     Memory,
     MemoryOperation,
     MemoryType,
+    PendingReconciliation,
     ReconciledMemory,
     memory_type_from_string,
 )
@@ -32,6 +33,35 @@ logger = logging.getLogger("dspy_lancedb_memory")
 _SEMANTIC_DUPLICATE_STOPWORDS = frozenset(
     {"a", "an", "the", "their", "his", "her", "our", "my", "your"}
 )
+
+
+class _SingleMemoryReconciler:
+    """Callable wrapper for dspy.Parallel — reconciles one memory against the store."""
+
+    def __init__(
+        self,
+        store: "LanceDSPyMemoryStore",
+        reconciler: MemoryReconciler,
+        memory_type: MemoryType | str | None,
+        skip_threshold: float,
+    ):
+        self._store = store
+        self._reconciler = reconciler
+        self._memory_type = memory_type
+        self._skip_threshold = skip_threshold
+
+    def __call__(self, **kwargs: Any) -> PendingReconciliation:
+        return self._store._reconcile_one(
+            content=kwargs["content"],
+            inferred_type=kwargs["inferred_type"],
+            memory_type=self._memory_type,
+            user_id=kwargs["user_id"],
+            session_id=kwargs["session_id"],
+            conversation_id=kwargs["conversation_id"],
+            metadata=kwargs["metadata"],
+            skip_threshold=self._skip_threshold,
+            reconciler=self._reconciler,
+        )
 
 
 class LanceDSPyMemoryStore:
@@ -564,6 +594,180 @@ class LanceDSPyMemoryStore:
             values={"is_active": False},
         )
 
+    def _reconcile_one(
+        self,
+        content: str,
+        inferred_type: MemoryType | str,
+        memory_type: MemoryType | str | None,
+        user_id: str,
+        session_id: str,
+        conversation_id: str,
+        metadata: dict[str, Any],
+        skip_threshold: float,
+        reconciler: MemoryReconciler,
+    ) -> PendingReconciliation:
+        memory_type_str = (
+            memory_type_from_string(memory_type)
+            if memory_type is not None
+            else inferred_type
+        )
+        memory_type_value = self._memory_type_value(memory_type_str)
+
+        filters = self._build_filters(
+            user_id=user_id,
+            session_id=session_id,
+            conversation_id=conversation_id,
+            memory_type=(
+                memory_type_value
+                if memory_type_value == MemoryType.SEMANTIC.value
+                else None
+            ),
+        )
+        candidates = (
+            self.table.search(self._embed(content), vector_column_name="vector")
+            .where(" AND ".join(filters))
+            .limit(self._UPSERT_CANDIDATE_LIMIT)
+            .to_list()
+        )
+
+        if candidates:
+            nearest_distance = float(candidates[0].get("_distance", 1.0))
+            nearest_similarity = 1.0 - nearest_distance
+            if nearest_similarity >= skip_threshold:
+                decision = ReconciledMemory(
+                    action="keep",
+                    memory_id=str(candidates[0]["id"]),
+                    final_content=str(candidates[0]["content"]),
+                    final_type=str(candidates[0]["memory_type"]),
+                )
+                return PendingReconciliation(
+                    content=content,
+                    inferred_type=str(memory_type_str),
+                    decision=decision,
+                    user_id=user_id,
+                    session_id=session_id,
+                    conversation_id=conversation_id,
+                    metadata=metadata,
+                    existing_row=self._without_vectors([dict(candidates[0])])[0],
+                )
+
+            existing_list = [
+                {
+                    "id": str(c["id"]),
+                    "content": str(c["content"]),
+                    "type": str(c["memory_type"]),
+                }
+                for c in candidates
+            ]
+            with dspy.context(lm=self._extraction_lm):
+                decision = reconciler(
+                    new_memory_content=content,
+                    new_memory_type=str(memory_type_str),
+                    existing_memories=existing_list,
+                ).reconciled
+        else:
+            decision = ReconciledMemory(
+                action="create",
+                memory_id="",
+                final_content=content,
+                final_type=str(memory_type_str),
+            )
+
+        return PendingReconciliation(
+            content=content,
+            inferred_type=str(memory_type_str),
+            decision=decision,
+            user_id=user_id,
+            session_id=session_id,
+            conversation_id=conversation_id,
+            metadata=metadata,
+        )
+
+    def _reconcile_batch_parallel(
+        self,
+        extracted: list[tuple[str, MemoryType | str]],
+        reconciler: MemoryReconciler,
+        user_id: str,
+        session_id: str,
+        conversation_id: str,
+        memory_type: MemoryType | str | None,
+        metadata: dict[str, Any],
+        skip_threshold: float,
+        num_threads: int,
+    ) -> list[PendingReconciliation]:
+        exec_pairs: list[tuple[Any, dspy.Example]] = []
+        for content, inferred_type in extracted:
+            module = _SingleMemoryReconciler(
+                store=self,
+                reconciler=reconciler,
+                memory_type=memory_type,
+                skip_threshold=skip_threshold,
+            )
+            example = dspy.Example(
+                content=content,
+                inferred_type=inferred_type,
+                user_id=user_id,
+                session_id=session_id,
+                conversation_id=conversation_id,
+                metadata=metadata,
+            ).with_inputs(
+                "content",
+                "inferred_type",
+                "user_id",
+                "session_id",
+                "conversation_id",
+                "metadata",
+            )
+            exec_pairs.append((module, example))
+
+        parallel = dspy.Parallel(
+            num_threads=num_threads,
+            return_failed_examples=False,
+            disable_progress_bar=True,
+        )
+        return list(parallel(exec_pairs))
+
+    def _apply_reconciliations(
+        self, pending: list[PendingReconciliation]
+    ) -> list[Memory]:
+        results: list[Memory] = []
+        for p in pending:
+            if p.decision.action == "keep":
+                if hasattr(p, "existing_row") and p.existing_row:
+                    results.append(p.existing_row)
+                else:
+                    kept = (
+                        self.table.search()
+                        .where(f"id = '{p.decision.memory_id}'")
+                        .to_list()
+                    )
+                    if kept:
+                        results.append(self._without_vectors([dict(kept[0])])[0])
+            elif p.decision.action == "update":
+                self.update_memory(
+                    memory_id=p.decision.memory_id,
+                    content=p.decision.final_content,
+                )
+                updated = (
+                    self.table.search()
+                    .where(f"replaces_id = '{p.decision.memory_id}'")
+                    .to_list()
+                )
+                if updated:
+                    results.append(self._without_vectors([dict(updated[0])])[0])
+            else:
+                results.append(
+                    self.create_memory(
+                        user_id=p.user_id,
+                        content=p.decision.final_content,
+                        session_id=p.session_id,
+                        conversation_id=p.conversation_id,
+                        memory_type=p.inferred_type,
+                        metadata=p.metadata,
+                    )
+                )
+        return results
+
     def upsert_memories(
         self,
         *,
@@ -577,6 +781,7 @@ class LanceDSPyMemoryStore:
         similarity_threshold: float = 0.85,
         skip_threshold: float = 0.85,
         use_reconciler: bool = True,
+        num_threads: int = 4,
     ) -> Memories:
         """Batch upsert — insert, update, or skip memories based on semantic
         similarity.  Mirrors :meth:`create_memories` but uses
@@ -621,6 +826,9 @@ class LanceDSPyMemoryStore:
             against existing candidates via an LLM-based :class:`MemoryReconciler`
             before any write. Set to ``False`` to skip the LLM and use the fast
             heuristic fallback.
+        num_threads : int
+            Number of concurrent threads for parallel reconciliation.
+            Default ``4``.  Set to ``1`` to run sequentially.
 
         Returns
         -------
@@ -648,99 +856,18 @@ class LanceDSPyMemoryStore:
 
             if use_reconciler:
                 reconciler = MemoryReconciler()
-                results: list[Memory] = []
-                for content, inferred_type in extracted:
-                    memory_type_str = (
-                        memory_type_from_string(memory_type)
-                        if memory_type is not None
-                        else inferred_type
-                    )
-                    memory_type_value = self._memory_type_value(memory_type_str)
-
-                    # Retrieve candidates for reconciliation
-                    filters = self._build_filters(
-                        user_id=user_id,
-                        session_id=session_id,
-                        conversation_id=conversation_id,
-                        memory_type=(
-                            memory_type_value
-                            if memory_type_value == MemoryType.SEMANTIC.value
-                            else None
-                        ),
-                    )
-                    candidates = (
-                        self.table.search(
-                            self._embed(content), vector_column_name="vector"
-                        )
-                        .where(" AND ".join(filters))
-                        .limit(self._UPSERT_CANDIDATE_LIMIT)
-                        .to_list()
-                    )
-
-                    if candidates:
-                        nearest_distance = float(candidates[0].get("_distance", 1.0))
-                        nearest_similarity = 1.0 - nearest_distance
-                        if nearest_similarity >= skip_threshold:
-                            results.append(
-                                self._without_vectors([dict(candidates[0])])[0]
-                            )
-                            continue
-
-                        existing_list = [
-                            {
-                                "id": str(c["id"]),
-                                "content": str(c["content"]),
-                                "type": str(c["memory_type"]),
-                            }
-                            for c in candidates
-                        ]
-                        with dspy.context(lm=self._extraction_lm):
-                            decision = reconciler(
-                                new_memory_content=content,
-                                new_memory_type=str(memory_type_str),
-                                existing_memories=existing_list,
-                            ).reconciled
-                    else:
-                        decision = ReconciledMemory(
-                            action="create",
-                            memory_id="",
-                            final_content=content,
-                            final_type=str(memory_type_str),
-                        )
-
-                    if decision.action == "keep":
-                        kept = (
-                            self.table.search()
-                            .where(f"id = '{decision.memory_id}'")
-                            .to_list()
-                        )
-                        if kept:
-                            results.append(self._without_vectors([dict(kept[0])])[0])
-                    elif decision.action == "update":
-                        self.update_memory(
-                            memory_id=decision.memory_id,
-                            content=decision.final_content,
-                        )
-                        updated = (
-                            self.table.search()
-                            .where(f"replaces_id = '{decision.memory_id}'")
-                            .to_list()
-                        )
-                        if updated:
-                            results.append(self._without_vectors([dict(updated[0])])[0])
-                    else:  # create
-                        results.append(
-                            self.create_memory(
-                                user_id=user_id,
-                                content=decision.final_content,
-                                session_id=session_id,
-                                conversation_id=conversation_id,
-                                memory_type=memory_type_str,
-                                metadata=metadata,
-                            )
-                        )
-
-                return results
+                pending = self._reconcile_batch_parallel(
+                    extracted=extracted,
+                    reconciler=reconciler,
+                    user_id=user_id,
+                    session_id=session_id,
+                    conversation_id=conversation_id,
+                    memory_type=memory_type,
+                    metadata=metadata or {},
+                    skip_threshold=skip_threshold,
+                    num_threads=num_threads,
+                )
+                return self._apply_reconciliations(pending)
 
             # Fast fallback: delegate each extracted memory to upsert_memory
             stored = [

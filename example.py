@@ -256,7 +256,32 @@ for m in upserted:
     print(f"  [{m.memory_type}] {m.content}")
 
 # ===========================================================================
-# 9. Process memories with deletion intent
+# 9. Parallel reconciliation — faster batch upserts
+# ===========================================================================
+
+# By default, upsert_memories reconciles each extracted memory in parallel
+# (num_threads=4).  You can tune concurrency or disable it entirely:
+parallel_upserted = store.upsert_memories(
+    user_id="user_123",
+    contents=[
+        {
+            "role": "user",
+            "content": (
+                "I switched from VS Code to Neovim last month. "
+                "My RAG pipeline now uses hybrid search with reranking. "
+                "I also started using uv instead of pip for Python packaging."
+            ),
+        },
+    ],
+    extract=True,
+    num_threads=4,  # default — set to 1 for sequential
+)
+
+for m in parallel_upserted:
+    print(f"  [{m.memory_type}] {m.content}")
+
+# ===========================================================================
+# 10. Process memories with deletion intent
 # ===========================================================================
 
 # If a user asks to delete or remove a memory, the process_memories method
