@@ -1770,3 +1770,304 @@ def test_filter_values_with_quotes_do_not_break_queries(
     )
 
     assert [r.id for r in results] == [memory.id]
+
+
+# ---------------------------------------------------------------------------
+# Group 1: BoundMemoryStore methods beyond create/search
+# ---------------------------------------------------------------------------
+
+
+def test_bound_store_upsert_memory_applies_context(
+    store: LanceDSPyMemoryStore,
+) -> None:
+    bound = store.with_scope(
+        user_id="user-1",
+        scope={"tenant": "tenant-a"},
+    )
+
+    original = bound.upsert_memory(
+        content="favorite food is pizza",
+        memory_type="semantic",
+        use_reconciler=False,
+    )
+
+    same = bound.upsert_memory(
+        content="favorite food is pizza",
+        memory_type="semantic",
+        use_reconciler=False,
+    )
+
+    assert same.id == original.id
+    assert same.scope == {"tenant": "tenant-a"}
+
+    different_scope = store.with_scope(
+        user_id="user-1",
+        scope={"tenant": "tenant-b"},
+    )
+    new = different_scope.upsert_memory(
+        content="favorite food is pizza",
+        memory_type="semantic",
+        use_reconciler=False,
+    )
+
+    assert new.id != original.id
+    assert len(_rows(store)) == 2
+    assert new.scope == {"tenant": "tenant-b"}
+
+
+def test_bound_store_create_memories_applies_context(
+    store: LanceDSPyMemoryStore,
+) -> None:
+    bound = store.with_scope(
+        user_id="user-1",
+        session_id="session-1",
+        scope={"project_id": "alpha"},
+    )
+
+    results = bound.create_memories(
+        contents=[{"role": "user", "content": "favorite food is pizza"}],
+        extract=False,
+        memory_type="semantic",
+    )
+
+    assert len(results) == 1
+    assert results[0].session_id == "session-1"
+    assert results[0].scope == {"project_id": "alpha"}
+
+
+def test_bound_store_list_memories_applies_context(
+    store: LanceDSPyMemoryStore,
+) -> None:
+    bound_a = store.with_scope(
+        user_id="user-1",
+        scope={"tenant": "tenant-a"},
+    )
+    bound_b = store.with_scope(
+        user_id="user-1",
+        scope={"tenant": "tenant-b"},
+    )
+
+    mem_a = bound_a.create_memory(
+        content="favorite food is pizza",
+        memory_type="semantic",
+    )
+    bound_b.create_memory(
+        content="favorite color is blue",
+        memory_type="semantic",
+    )
+
+    listed = bound_a.list_memories()
+
+    assert len(listed) == 1
+    assert listed[0].id == mem_a.id
+    assert listed[0].scope == {"tenant": "tenant-a"}
+
+
+# ---------------------------------------------------------------------------
+# Group 2: list_memories with limit + scope/metadata
+# ---------------------------------------------------------------------------
+
+
+def test_list_memories_limit_with_scope_filter(
+    store: LanceDSPyMemoryStore,
+) -> None:
+    for i in range(5):
+        store.create_memory(
+            user_id="user-1",
+            content="favorite food is pizza",
+            memory_type="semantic",
+            scope={"group": "a", "index": str(i)},
+        )
+    for i in range(5):
+        store.create_memory(
+            user_id="user-1",
+            content="favorite color is blue",
+            memory_type="semantic",
+            scope={"group": "b", "index": str(i)},
+        )
+
+    results = store.list_memories(
+        user_id="user-1",
+        scope={"group": "a"},
+        limit=3,
+    )
+
+    assert len(results) == 3
+    for r in results:
+        assert r.scope["group"] == "a"
+
+
+def test_list_memories_limit_with_metadata_filter(
+    store: LanceDSPyMemoryStore,
+) -> None:
+    for i in range(4):
+        store.create_memory(
+            user_id="user-1",
+            content="favorite food is pizza",
+            memory_type="semantic",
+            metadata={"source": "doc", "index": str(i)},
+        )
+    store.create_memory(
+        user_id="user-1",
+        content="favorite color is blue",
+        memory_type="semantic",
+        metadata={"source": "chat"},
+    )
+
+    results = store.list_memories(
+        user_id="user-1",
+        metadata_filter={"source": "doc"},
+        limit=2,
+    )
+
+    assert len(results) == 2
+    for r in results:
+        assert r.metadata["source"] == "doc"
+
+
+# ---------------------------------------------------------------------------
+# Group 3: get_memory with include_inactive
+# ---------------------------------------------------------------------------
+
+
+def test_get_memory_returns_active_by_default(
+    store: LanceDSPyMemoryStore,
+) -> None:
+    memory = store.create_memory(
+        user_id="user-1",
+        content="favorite food is pizza",
+        memory_type="semantic",
+    )
+
+    fetched = store.get_memory(memory_id=memory.id)
+    assert fetched is not None
+    assert fetched.id == memory.id
+
+    store.delete_memory(memory_id=memory.id)
+
+    gone = store.get_memory(memory_id=memory.id)
+    assert gone is None
+
+
+def test_get_memory_include_inactive_returns_deleted(
+    store: LanceDSPyMemoryStore,
+) -> None:
+    memory = store.create_memory(
+        user_id="user-1",
+        content="favorite food is pizza",
+        memory_type="semantic",
+    )
+
+    store.delete_memory(memory_id=memory.id)
+
+    active = store.get_memory(memory_id=memory.id)
+    assert active is None
+
+    inactive = store.get_memory(memory_id=memory.id, include_inactive=True)
+    assert inactive is not None
+    assert inactive.id == memory.id
+    assert inactive.is_active is False
+
+
+# ---------------------------------------------------------------------------
+# Group 4: get_memory_history edge cases
+# ---------------------------------------------------------------------------
+
+
+def test_get_memory_history_single_memory(
+    store: LanceDSPyMemoryStore,
+) -> None:
+    memory = store.create_memory(
+        user_id="user-1",
+        content="favorite food is pizza",
+        memory_type="semantic",
+    )
+
+    history = store.get_memory_history(memory_id=memory.id)
+
+    assert len(history) == 1
+    assert history[0].id == memory.id
+    assert history[0].content == "favorite food is pizza"
+
+
+def test_get_memory_history_two_hops(
+    store: LanceDSPyMemoryStore,
+) -> None:
+    mem_a = store.create_memory(
+        user_id="user-1",
+        content="I love hiking",
+        memory_type="semantic",
+    )
+
+    store.update_memory(
+        memory_id=mem_a.id,
+        content="hiking is my hobby",
+    )
+    active_rows = _active_rows(store)
+    assert len(active_rows) == 1
+    mem_b = active_rows[0]
+
+    history = store.get_memory_history(memory_id=mem_b["id"])
+
+    assert len(history) == 2
+    assert history[0].id == mem_b["id"]
+    assert history[0].content == "hiking is my hobby"
+    assert history[1].id == mem_a.id
+    assert history[1].content == "I love hiking"
+
+
+# ---------------------------------------------------------------------------
+# Group 5: ScopeLike dispatch for upsert + BoundMemoryStore
+# ---------------------------------------------------------------------------
+
+
+def test_upsert_memory_with_pydantic_base_model_scope(
+    store: LanceDSPyMemoryStore,
+) -> None:
+    class DeploymentScope(BaseModel):
+        tenant: str
+        region: str
+
+    scope = DeploymentScope(tenant="acme", region="us-east")
+
+    result = store.upsert_memory(
+        user_id="user-1",
+        content="favorite food is pizza",
+        memory_type="semantic",
+        scope=scope,
+        use_reconciler=False,
+    )
+
+    assert result.scope == {"tenant": "acme", "region": "us-east"}
+
+    results = store.search_memories(
+        user_id="user-1",
+        query="what food do I like",
+        scope=DeploymentScope(tenant="acme", region="us-east"),
+    )
+
+    assert [r.id for r in results] == [result.id]
+
+
+def test_bound_store_with_pydantic_base_model_scope(
+    store: LanceDSPyMemoryStore,
+) -> None:
+    class ProjectScope(BaseModel):
+        team: str
+        sprint: str
+
+    bound = store.with_scope(
+        user_id="user-1",
+        scope=ProjectScope(team="backend", sprint="s42"),
+    )
+
+    memory = bound.create_memory(
+        content="favorite food is pizza",
+        memory_type="semantic",
+    )
+
+    assert memory.scope == {"team": "backend", "sprint": "s42"}
+
+    listed = bound.list_memories()
+    assert len(listed) == 1
+    assert listed[0].scope == {"team": "backend", "sprint": "s42"}
