@@ -42,6 +42,7 @@ dev = [
   "isort>=8.0.1",
   "poethepoet>=0.45.0",
   "pytest>=9.0.3",
+  "pytest-cov>=7.1.0",
   "ruff>=0.15.12",
   "ty>=0.0.34",
   "usechange>=0.1.43",
@@ -58,6 +59,7 @@ dev = "uv run example.py"
 clean-full = "sh -c 'uv run isort . && uv run ruff check . --fix && uv run ruff format . && uv run deptry . && uv run ty check'"
 clean = "sh -c 'uv run isort . && uv run ruff format .'"
 test = "uv run pytest tests/ -v"
+test-cov = "uv run pytest tests/ -v --cov=dspy_lancedb_memory --cov-report=term-missing"
 sort = "uv run isort ."
 lint = "uv run ruff check ."
 format = "uv run ruff format ."
