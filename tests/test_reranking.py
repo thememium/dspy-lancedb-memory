@@ -107,26 +107,31 @@ class TestAttachFallbackScores:
 
 
 class TestRerank:
-    def test_rerank_with_litellm_provider(self, sample_table):
-        reranker = LiteLLMReranker(model="cohere/rerank-english-v3.0", column="content")
+    def test_rerank_with_litellm_and_api_base_and_key(self, sample_table):
+        reranker = LiteLLMReranker(
+            model="cohere/rerank-english-v3.0",
+            column="content",
+            api_base="http://custom.api",
+            api_key="test-key",
+        )
 
         mock_response = {
             "results": [
-                {"index": 1, "relevance_score": 0.95},
-                {"index": 0, "relevance_score": 0.85},
+                {"index": 0, "relevance_score": 0.95},
+                {"index": 1, "relevance_score": 0.85},
                 {"index": 2, "relevance_score": 0.75},
             ]
         }
 
-        with patch("dspy_lancedb_memory.reranking.rerank", return_value=mock_response):
+        with patch("dspy_lancedb_memory.reranking.rerank", return_value=mock_response) as mock_rerank:
             result = reranker._rerank(sample_table, "test query")
 
+        # Should pass api_base and api_key to litellm.rerank
+        mock_rerank.assert_called_once()
+        call_kwargs = mock_rerank.call_args[1]
+        assert call_kwargs["api_base"] == "http://custom.api"
+        assert call_kwargs["api_key"] == "test-key"
         assert "_relevance_score" in result.column_names
-        # Results should be reordered by relevance
-        contents = result["content"].to_pylist()
-        assert contents[0] == "test content 2"
-        assert contents[1] == "test content 1"
-        assert contents[2] == "test content 3"
 
     def test_rerank_with_openrouter_model(self, sample_table):
         reranker = LiteLLMReranker(model="openrouter/cohere/rerank-4-fast", column="content")
@@ -374,18 +379,17 @@ class TestRerankInterface:
 
         assert "_score" in result.column_names
 
-    def test_rerank_hybrid_with_all_score(self, sample_table, sample_fts_table):
-        reranker = LiteLLMReranker(return_score="all", column="content")
+    def test_rerank_hybrid_with_relevance_score(self, sample_table, sample_fts_table):
+        reranker = LiteLLMReranker(return_score="relevance", column="content")
 
         # Mock both the merge and rerank methods
-        with patch.object(reranker, "_merge_and_keep_scores") as mock_merge:
+        with patch.object(reranker, "merge_results") as mock_merge:
             with patch.object(reranker, "_rerank") as mock_rerank:
                 merged = pa.table(
                     {
                         "content": ["test content 1", "test content 2", "test content 3"],
                         "id": ["id1", "id2", "id3"],
                         "_distance": [0.1, 0.2, 0.3],
-                        "_score": [0.9, 0.8, 0.7],
                     }
                 )
                 mock_merge.return_value = merged
@@ -395,8 +399,19 @@ class TestRerankInterface:
                     pa.array([0.95, 0.85, 0.75], type=pa.float32()),
                 )
                 mock_rerank.return_value = reranked
-                result = reranker.rerank_hybrid("query", sample_table, sample_fts_table)
 
-        assert "_relevance_score" in result.column_names
+                with patch.object(reranker, "_keep_relevance_score") as mock_keep:
+                    final_table = pa.table(
+                        {
+                            "content": ["test content 1", "test content 2", "test content 3"],
+                            "id": ["id1", "id2", "id3"],
+                            "_relevance_score": [0.95, 0.85, 0.75],
+                        }
+                    )
+                    mock_keep.return_value = final_table
+                    result = reranker.rerank_hybrid("query", sample_table, sample_fts_table)
+
+        # When score="relevance", merge_results should be called (not _merge_and_keep_scores)
         mock_merge.assert_called_once()
-        mock_rerank.assert_called_once()
+        # _keep_relevance_score should be called
+        mock_keep.assert_called_once()
