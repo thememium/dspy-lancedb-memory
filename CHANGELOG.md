@@ -1,5 +1,17 @@
 # Changelog
 
+## v0.1.12 (2026-07-11)
+
+[Compare changes](https://github.com/thememium/dspy-lancedb-memory/compare/v0.1.11...v0.1.12)
+
+### 🚀 Enhancements
+
+- customizable scope and metadata filter (#6) (#6) ([2e75982](https://github.com/thememium/dspy-lancedb-memory/commit/2e75982b290d49b3c44da463e2a6464ac96633c7))
+
+### Contributors
+
+- Edward Boswell <thememium@gmail.com>
+
 ## v0.1.11 (2026-06-20)
 
 [Compare changes](https://github.com/thememium/dspy-lancedb-memory/compare/v0.1.10...v0.1.11)
