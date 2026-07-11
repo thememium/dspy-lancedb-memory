@@ -55,6 +55,12 @@ class TestMemoryTypeMissing:
         with pytest.raises(ValueError):
             MemoryType("nonexistent_type")
 
+    def test_memory_type_missing_returns_none_for_unknown(self):
+        """Test _missing_ returns None for unknown values (line 36)."""
+        # Call _missing_ directly to cover line 36
+        result = MemoryType._missing_("nonexistent_type")
+        assert result is None
+
 
 # ---------------------------------------------------------------------------
 # memory_type_from_string()
