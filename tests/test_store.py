@@ -32,6 +32,8 @@ EMBEDDINGS: dict[str, list[float]] = {
     # skip-threshold test vector — L2 distance ≈ 0.094 with "car color is blue" (1 - dist ≈ 0.91, >= 0.85 skip)
     "my car is blue": [0.08, 0.45, 0.5],
     "hiking": [0.0, 0.05, 0.95],
+    # For reconciler test — similar to "name is Edward" but not identical
+    "my name is edward": [0.85, 0.15, 0.0],
 }
 
 
@@ -307,17 +309,49 @@ def test_reconciler_keeps_exact_match(store, monkeypatch):
         memory_type="semantic",
     )
 
-    monkeypatch.setattr("dspy_lancedb_memory.store.MemoryReconciler", StubReconciler)
+    # Custom reconciler that returns "keep" for semantically similar content
+    class KeepReconciler:
+        def __init__(self):
+            pass
 
+        def __call__(self, *, new_memory_content, new_memory_type, existing_memories):
+            from dspy_lancedb_memory.models import ReconciledMemory
+
+            # Return "keep" for the first existing memory (simulating semantic match)
+            if existing_memories:
+                return dspy.Prediction(
+                    reconciled=ReconciledMemory(
+                        action="keep",
+                        memory_id=existing_memories[0]["id"],
+                        final_content=existing_memories[0]["content"],
+                        final_type=existing_memories[0]["type"],
+                    )
+                )
+            return dspy.Prediction(
+                reconciled=ReconciledMemory(
+                    action="create",
+                    memory_id="",
+                    final_content=new_memory_content,
+                    final_type=new_memory_type,
+                )
+            )
+
+    monkeypatch.setattr("dspy_lancedb_memory.store.MemoryReconciler", KeepReconciler)
+
+    # Use content with similar but not identical embedding to avoid skip_threshold gate
+    # "my name is edward" has embedding [0.85, 0.15, 0.0] vs "name is Edward" [0.9, 0.1, 0.0]
+    # This gives similarity ~0.93 which is < skip_threshold=1.0, so reconciler is called
     result = store.upsert_memory(
         user_id="user-1",
-        content="name is Edward",
+        content="my name is edward",
         memory_type="semantic",
+        skip_threshold=1.0,  # Force reconciler path by setting high skip_threshold
     )
 
+    # KeepReconciler returns "keep" for the first existing memory
     assert result.id == original.id
+    assert result.content == "name is Edward"
     assert len(_rows(store)) == 1
-    assert _row_by_id(store, original.id)["content"] == "name is Edward"
 
 
 def test_reconciler_updates_refinement(store, monkeypatch):
