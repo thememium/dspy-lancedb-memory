@@ -1368,3 +1368,38 @@ def test_create_memories_verbatim_with_empty_list(store):
             contents=[],
             extract=False,
         )
+
+
+# ---------------------------------------------------------------------------
+# _ensure_fts_index exception handling (lines 490-491)
+# ---------------------------------------------------------------------------
+
+
+def test_ensure_fts_index_handles_exception(store):
+    """Test _ensure_fts_index handles exceptions gracefully (lines 490-491)."""
+    from unittest.mock import MagicMock
+
+    # Create a mock table that raises an exception on create_fts_index
+    mock_table = MagicMock()
+    mock_table.create_fts_index.side_effect = Exception("FTS index error")
+
+    # Call _ensure_fts_index - should not raise, just log
+    store._ensure_fts_index(mock_table)
+
+    # Verify create_fts_index was called
+    mock_table.create_fts_index.assert_called_once_with("content", replace=True)
+
+
+def test_ensure_fts_index_creates_index(store):
+    """Test _ensure_fts_index creates FTS index successfully."""
+    from unittest.mock import MagicMock
+
+    # Create a mock table that succeeds on create_fts_index
+    mock_table = MagicMock()
+    mock_table.create_fts_index.return_value = None
+
+    # Call _ensure_fts_index - should succeed
+    store._ensure_fts_index(mock_table)
+
+    # Verify create_fts_index was called
+    mock_table.create_fts_index.assert_called_once_with("content", replace=True)
