@@ -421,3 +421,31 @@ def test_semantic_match_action_skip_high_sequence_ratio(store):
 
     # Should return "skip" because very similar
     assert result == "skip"
+
+
+def test_semantic_match_action_skip_line_421(store):
+    """Test _semantic_match_action hits line 421 (skip with high sequence_ratio).
+
+    Line 421: return "skip" when sequence_ratio >= 0.94 and not new_is_richer and not same_slot_replacement.
+    """
+    # Use strings that are very similar character-wise but have different first token.
+    # This ensures:
+    # - High sequence_ratio (>= 0.94) because only first character differs
+    # - prefix = 0 (first tokens differ), so same_slot_replacement = False
+    # - Same token count, so new_is_richer = False
+    #
+    # "abcdefg hijklmn opqrstu" vs "xbcdefg hijklmn opqrstu"
+    # - prefix = 0 ("abcdefg" != "xbcdefg")
+    # - same_slot_replacement: 0 >= max(2, min(3,3)-1)=max(2,2)=2 → False
+    # - new_is_richer: same tokens, existing not substring of new → False
+    # - sequence_ratio: ~0.96 (only first char differs)
+    result = store._semantic_match_action(
+        new_content="abcdefg hijklmn opqrstu",
+        existing_content="xbcdefg hijklmn opqrstu",
+        distance=0.15,  # cosine_similarity = 0.85
+        similarity_threshold=0.8,
+        skip_threshold=0.9,  # cosine_similarity < skip_threshold, so no early return
+    )
+
+    # Should return "skip" because sequence_ratio >= 0.94 and not new_is_richer and not same_slot_replacement
+    assert result == "skip"
