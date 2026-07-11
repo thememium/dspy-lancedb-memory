@@ -138,6 +138,34 @@ class TestConstructorPaths:
                 result = store._embed_many(["text1", "text2"])
                 mock_embedder.assert_called_with(["text1", "text2"])
                 assert result == [[0.1, 0.2, 0.3], [0.4, 0.5, 0.6]]
+
+    def test_infer_embedding_dim_from_existing_table(self, tmp_path):
+        """Test _infer_embedding_dim gets dimension from existing table (lines 130-133)."""
+        mock_lm = SimpleNamespace(model="test-model", kwargs={})
+        mock_embedder = MagicMock()
+        mock_embedder.return_value = [[0.1, 0.2, 0.3]]
+
+        with patch("dspy_lancedb_memory.store.dspy.LM", return_value=mock_lm):
+            with patch("dspy_lancedb_memory.store.dspy.Embedder", return_value=mock_embedder):
+                # First store creates the table with dimension 3
+                store1 = LanceDSPyMemoryStore(
+                    uri=str(tmp_path),
+                    table_name="test_infer_dim",
+                    embedding_lm=mock_lm,
+                    embedding_dim=3,
+                    reranker=None,
+                )
+
+                # Second store should infer dimension from existing table
+                store2 = LanceDSPyMemoryStore(
+                    uri=str(tmp_path),
+                    table_name="test_infer_dim",
+                    embedding_lm=mock_lm,
+                    embedding_dim=None,  # Pass None to trigger _infer_embedding_dim
+                    reranker=None,
+                )
+                # Should infer dimension 3 from existing table
+                assert store2.embedding_dim == 3
         """Test constructor extracts api_base from embedding_lm kwargs."""
         mock_embedder = MagicMock()
         mock_embedder.return_value = [[0.1, 0.2, 0.3]]
