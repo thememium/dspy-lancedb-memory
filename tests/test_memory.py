@@ -207,14 +207,18 @@ class TestMemoryStore:
             )
             assert store.reranker == "mock-reranker"
 
-    def test_store_with_reranker_lm_dspy_lm_creates_litellm_reranker(self, tmp_path):
-        """Test Store() with reranker_lm as dspy.LM creates LiteLLMReranker."""
+    def test_store_with_reranker_lm_dspy_lm_with_api_base_and_key(self, tmp_path):
+        """Test Store() with reranker_lm as dspy.LM with api_base and api_key."""
         config._lm = SimpleNamespace(model="test-model")
 
         with patch("dspy_lancedb_memory.memory.LiteLLMReranker") as mock_reranker:
             mock_reranker.return_value = "mock-reranker"
-            # Use actual dspy.LM for reranker_lm to test the isinstance check
-            reranker_lm = dspy.LM("cohere/rerank-4-fast")
+            # Create a dspy.LM with api_base and api_key
+            reranker_lm = dspy.LM(
+                "cohere/rerank-4-fast",
+                api_base="http://custom.api",
+                api_key="test-key",
+            )
             store = memory.Store(
                 uri=str(tmp_path),
                 table_name="test",
@@ -222,11 +226,13 @@ class TestMemoryStore:
                 embedding_dim=3,
                 reranker_lm=reranker_lm,
             )
-            # Should extract model string from dspy.LM
+            # Should extract model string and api_base/api_key from dspy.LM
             mock_reranker.assert_called_once()
             call_kwargs = mock_reranker.call_args[1]
             assert call_kwargs["model"] == "cohere/rerank-4-fast"
             assert call_kwargs["column"] == "content"
+            assert call_kwargs["api_base"] == "http://custom.api"
+            assert call_kwargs["api_key"] == "test-key"
             assert store.reranker == "mock-reranker"
 
     def test_store_with_config_reranker_lm(self, tmp_path):
