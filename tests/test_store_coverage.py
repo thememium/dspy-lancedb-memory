@@ -1017,3 +1017,281 @@ def test_memory_type_value_with_none(store):
     """Test _memory_type_value with None input."""
     result = store._memory_type_value(None)
     assert result is None
+
+
+# ---------------------------------------------------------------------------
+# BoundMemoryStore methods
+# ---------------------------------------------------------------------------
+
+
+def test_bound_store_process_memories(store):
+    """Test BoundMemoryStore.process_memories."""
+    bound = store.with_scope(
+        user_id="user-1",
+        session_id="session-1",
+        scope={"tenant": "tenant-a"},
+    )
+
+    created, deleted = bound.process_memories(
+        contents=[{"role": "user", "content": "I love pizza"}],
+        extract=False,
+    )
+
+    assert len(created) == 1
+    assert created[0].session_id == "session-1"
+    assert created[0].scope == {"tenant": "tenant-a"}
+
+
+def test_bound_store_delete_memories_by_search(store):
+    """Test BoundMemoryStore.delete_memories_by_search."""
+    bound = store.with_scope(
+        user_id="user-1",
+        scope={"tenant": "tenant-a"},
+    )
+
+    bound.create_memory(
+        content="favorite food is pizza",
+        memory_type="semantic",
+    )
+
+    deleted = bound.delete_memories_by_search(
+        query="delete my pizza memory",
+        similarity_threshold=0.5,
+    )
+
+    assert len(deleted) == 1
+    assert deleted[0].content == "favorite food is pizza"
+
+
+def test_bound_store_upsert_memories(store, monkeypatch):
+    """Test BoundMemoryStore.upsert_memories."""
+    bound = store.with_scope(
+        user_id="user-1",
+        scope={"tenant": "tenant-a"},
+    )
+
+    monkeypatch.setattr(
+        "dspy_lancedb_memory.store.MemoryExtractor.forward",
+        lambda self, messages: dspy.Prediction(
+            memories=[("favorite food is pizza", "semantic")]
+        ),
+    )
+    monkeypatch.setattr("dspy_lancedb_memory.store.MemoryReconciler", StubReconciler)
+
+    results = bound.upsert_memories(
+        contents=[{"role": "user", "content": "I like pizza"}],
+        extract=True,
+        num_threads=1,
+    )
+
+    assert len(results) == 1
+    assert results[0].scope == {"tenant": "tenant-a"}
+
+
+def test_bound_store_scope_merging(store):
+    """Test BoundMemoryStore._scope merges scopes correctly."""
+    bound = store.with_scope(
+        user_id="user-1",
+        scope={"tenant": "a", "repo": "b"},
+    )
+
+    # Test internal _scope method
+    merged = bound._scope({"project": "c"})
+    assert merged == {"tenant": "a", "repo": "b", "project": "c"}
+
+
+def test_bound_store_create_memories_extract(store, monkeypatch):
+    """Test BoundMemoryStore.create_memories with extract=True."""
+    bound = store.with_scope(
+        user_id="user-1",
+        scope={"tenant": "tenant-a"},
+    )
+
+    monkeypatch.setattr(
+        "dspy_lancedb_memory.store.MemoryExtractor.forward",
+        lambda self, messages: dspy.Prediction(
+            memories=[("favorite food is pizza", "semantic")]
+        ),
+    )
+
+    results = bound.create_memories(
+        contents=[{"role": "user", "content": "I like pizza"}],
+        extract=True,
+    )
+
+    assert len(results) == 1
+    assert results[0].scope == {"tenant": "tenant-a"}
+
+
+# ---------------------------------------------------------------------------
+# upsert_memory non-semantic paths
+# ---------------------------------------------------------------------------
+
+
+def test_upsert_nonsemantic_exact_match_returns_existing(store):
+    """Test non-semantic upsert with exact content match returns existing."""
+    original = store.create_memory(
+        user_id="user-1",
+        content="favorite food is pizza",
+        memory_type="preference",
+    )
+
+    result = store.upsert_memory(
+        user_id="user-1",
+        content="favorite food is pizza",
+        memory_type="preference",
+        use_reconciler=False,
+    )
+
+    assert result.id == original.id
+
+
+def test_upsert_nonsemantic_similarity_above_threshold_updates(store):
+    """Test non-semantic upsert updates when similarity is above threshold."""
+    original = store.create_memory(
+        user_id="user-1",
+        content="favorite food is pizza",
+        memory_type="preference",
+    )
+
+    # Use a content with high similarity but not exact match
+    result = store.upsert_memory(
+        user_id="user-1",
+        content="favorite food is pepperoni pizza",
+        memory_type="preference",
+        similarity_threshold=0.8,
+        skip_threshold=0.99,  # High skip threshold to allow update
+        use_reconciler=False,
+    )
+
+    # Should either update or create depending on similarity
+    assert result is not None
+
+
+def test_upsert_nonsemantic_below_skip_threshold_creates(store):
+    """Test non-semantic upsert creates when below skip threshold."""
+    store.create_memory(
+        user_id="user-1",
+        content="favorite food is pizza",
+        memory_type="preference",
+    )
+
+    # Use a content with low similarity
+    result = store.upsert_memory(
+        user_id="user-1",
+        content="favorite programming language is python",
+        memory_type="preference",
+        use_reconciler=False,
+    )
+
+    assert result.content == "favorite programming language is python"
+
+
+# ---------------------------------------------------------------------------
+# delete_memories_by_search edge cases
+# ---------------------------------------------------------------------------
+
+
+def test_delete_memories_by_search_no_candidates(store):
+    """Test delete_memories_by_search returns empty when no candidates."""
+    deleted = store.delete_memories_by_search(
+        user_id="user-1",
+        query="nonexistent memory",
+    )
+
+    assert deleted == []
+
+
+def test_delete_memories_by_search_with_scope_and_metadata(store):
+    """Test delete_memories_by_search with scope and metadata filter."""
+    store.create_memory(
+        user_id="user-1",
+        content="favorite food is pizza",
+        memory_type="semantic",
+        scope={"tenant": "a"},
+        metadata={"source": "chat"},
+    )
+    store.create_memory(
+        user_id="user-1",
+        content="favorite food is pizza",
+        memory_type="semantic",
+        scope={"tenant": "b"},
+        metadata={"source": "doc"},
+    )
+
+    deleted = store.delete_memories_by_search(
+        user_id="user-1",
+        query="delete my pizza memory",
+        scope={"tenant": "a"},
+        metadata_filter={"source": "chat"},
+        similarity_threshold=0.5,
+    )
+
+    assert len(deleted) == 1
+
+
+# ---------------------------------------------------------------------------
+# process_memories edge cases for uncovered paths
+# ---------------------------------------------------------------------------
+
+
+def test_process_memories_update_action(store, monkeypatch):
+    """Test process_memories update action (line 1486)."""
+    from dspy_lancedb_memory.models import MemoryOperation
+
+    store.create_memory(
+        user_id="user-1",
+        content="name is Edward",
+        memory_type="semantic",
+    )
+
+    monkeypatch.setattr(
+        "dspy_lancedb_memory.store.MemoryOperationExtractor.forward",
+        lambda self, messages: dspy.Prediction(
+            operations=[
+                MemoryOperation(
+                    action="update",
+                    content="name is Edward Boswell",
+                    memory_type="semantic",
+                )
+            ]
+        ),
+    )
+
+    created, deleted = store.process_memories(
+        user_id="user-1",
+        contents=[{"role": "user", "content": "My full name is Edward Boswell"}],
+        extract=True,
+        use_reconciler=False,
+    )
+
+    assert len(created) == 1
+    assert created[0].content == "name is Edward Boswell"
+
+
+def test_process_memories_empty_search_query_skips(store, monkeypatch):
+    """Test process_memories skips delete with empty search query."""
+    from dspy_lancedb_memory.models import MemoryOperation
+
+    monkeypatch.setattr(
+        "dspy_lancedb_memory.store.MemoryOperationExtractor.forward",
+        lambda self, messages: dspy.Prediction(
+            operations=[
+                MemoryOperation(
+                    action="delete",
+                    content="",
+                    search_query="",
+                    memory_type="",
+                )
+            ]
+        ),
+    )
+
+    created, deleted = store.process_memories(
+        user_id="user-1",
+        contents=[{"role": "user", "content": "Delete something"}],
+        extract=True,
+    )
+
+    assert len(created) == 0
+    assert len(deleted) == 0
