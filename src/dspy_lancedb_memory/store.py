@@ -439,6 +439,7 @@ class LanceDSPyMemoryStore:
                 )
                 self.db.drop_table(self.table_name)
             else:
+                self._ensure_fts_index(table)
                 return table
 
         schema = pa.schema(
@@ -458,7 +459,7 @@ class LanceDSPyMemoryStore:
             ]
         )
 
-        return self.db.create_table(
+        table = self.db.create_table(
             self.table_name,
             data=[
                 {
@@ -478,6 +479,18 @@ class LanceDSPyMemoryStore:
             ],
             schema=schema,
         )
+        self._ensure_fts_index(table)
+        return table
+
+    @staticmethod
+    def _ensure_fts_index(table) -> None:
+        """Create a full-text search index on the ``content`` column if absent."""
+        try:
+            table.create_fts_index("content", replace=True)
+        except Exception:
+            logger.debug(
+                "FTS index already exists or could not be created", exc_info=True
+            )
 
     def _build_memory_row(
         self,
@@ -875,11 +888,16 @@ class LanceDSPyMemoryStore:
         limit: int = 5,
         use_reranker: bool = False,
         min_relevance_score: float | None = None,
+        query_type: str = "vector",
+        refine_factor: int | None = None,
     ) -> Memories:
         if min_relevance_score is None:
-            min_relevance_score = (
-                0.3 if (self.reranker is not None and use_reranker) else 0.5
-            )
+            if self.reranker is not None and use_reranker:
+                min_relevance_score = 0.3
+            elif query_type == "hybrid":
+                min_relevance_score = 0.0
+            else:
+                min_relevance_score = 0.5
 
         filters = self._build_filters(
             user_id=user_id,
@@ -888,17 +906,33 @@ class LanceDSPyMemoryStore:
             memory_type=self._memory_type_value(memory_type),
         )
 
-        builder = cast(
-            LanceVectorQueryBuilder,
-            self.table.search(self._embed(query), vector_column_name="vector"),
-        )
-
         fetch_limit = limit * self.rerank_limit_multiplier
         if scope or metadata_filter:
             fetch_limit *= 10
 
-        if self.reranker is not None and use_reranker:
-            builder = builder.rerank(self.reranker, query_string=query)
+        if query_type == "hybrid":
+            builder = (
+                self.table.search(
+                    query_type="hybrid",
+                    vector_column_name="vector",
+                    fts_columns="content",
+                )
+                .vector(self._embed(query))
+                .text(query)
+            )
+            if refine_factor is not None:
+                builder = builder.refine_factor(refine_factor)
+            if self.reranker is not None and use_reranker:
+                builder = builder.rerank(self.reranker, query_string=query)
+        else:
+            builder = cast(
+                LanceVectorQueryBuilder,
+                self.table.search(self._embed(query), vector_column_name="vector"),
+            )
+            if refine_factor is not None:
+                builder = builder.refine_factor(refine_factor)
+            if self.reranker is not None and use_reranker:
+                builder = builder.rerank(self.reranker, query_string=query)
 
         results = builder.where(" AND ".join(filters)).limit(fetch_limit).to_list()
         results = self._filter_rows_by_json_fields(
