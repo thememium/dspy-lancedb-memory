@@ -31,6 +31,7 @@ EMBEDDINGS: dict[str, list[float]] = {
     "vehicle color blue": [0.02, 0.48, 0.5],
     # skip-threshold test vector — L2 distance ≈ 0.094 with "car color is blue" (1 - dist ≈ 0.91, >= 0.85 skip)
     "my car is blue": [0.08, 0.45, 0.5],
+    "hiking": [0.0, 0.05, 0.95],
 }
 
 
@@ -2071,3 +2072,117 @@ def test_bound_store_with_pydantic_base_model_scope(
     listed = bound.list_memories()
     assert len(listed) == 1
     assert listed[0].scope == {"team": "backend", "sprint": "s42"}
+
+
+# ---------------------------------------------------------------------------
+# FTS index and hybrid search tests
+# ---------------------------------------------------------------------------
+
+
+def test_fts_index_is_created_on_table(store: LanceDSPyMemoryStore) -> None:
+    """The FTS index on 'content' should exist after table creation."""
+    indices = store.table.list_indices()
+    fts_indices = [idx for idx in indices if idx.index_type == "FTS"]
+    assert len(fts_indices) >= 1
+    assert "content" in fts_indices[0].columns
+
+
+def test_search_memories_refine_factor_does_not_error(
+    store: LanceDSPyMemoryStore,
+) -> None:
+    """refine_factor should pass through to LanceDB without breaking the query."""
+    store.create_memory(
+        user_id="user-1",
+        content="favorite food is pizza",
+        memory_type="semantic",
+    )
+    store.create_memory(
+        user_id="user-1",
+        content="favorite color is blue",
+        memory_type="semantic",
+    )
+
+    results = store.search_memories(
+        user_id="user-1",
+        query="what food do I like",
+        refine_factor=3,
+    )
+
+    assert len(results) >= 1
+
+
+def test_search_memories_hybrid_returns_results(
+    store: LanceDSPyMemoryStore,
+) -> None:
+    """Hybrid search (vector + FTS) should return results that match by keyword."""
+    store.create_memory(
+        user_id="user-1",
+        content="favorite food is pizza",
+        memory_type="semantic",
+    )
+    store.create_memory(
+        user_id="user-1",
+        content="favorite color is blue",
+        memory_type="semantic",
+    )
+    store.create_memory(
+        user_id="user-1",
+        content="I love hiking",
+        memory_type="semantic",
+    )
+
+    results = store.search_memories(
+        user_id="user-1",
+        query="hiking",
+        query_type="hybrid",
+        limit=5,
+    )
+
+    assert len(results) >= 1
+    contents = [r.content for r in results]
+    assert any("hiking" in c for c in contents)
+
+
+def test_search_memories_hybrid_with_refine_factor(
+    store: LanceDSPyMemoryStore,
+) -> None:
+    """Hybrid search with refine_factor should work without errors."""
+    store.create_memory(
+        user_id="user-1",
+        content="favorite food is pizza",
+        memory_type="semantic",
+    )
+    store.create_memory(
+        user_id="user-1",
+        content="I love hiking",
+        memory_type="semantic",
+    )
+
+    results = store.search_memories(
+        user_id="user-1",
+        query="hiking",
+        query_type="hybrid",
+        refine_factor=2,
+        limit=5,
+    )
+
+    assert len(results) >= 1
+
+
+def test_search_memories_vector_default_unchanged(
+    store: LanceDSPyMemoryStore,
+) -> None:
+    """Default query_type='vector' should behave exactly as before."""
+    store.create_memory(
+        user_id="user-1",
+        content="I love hiking",
+        memory_type="semantic",
+    )
+
+    results = store.search_memories(
+        user_id="user-1",
+        query="what are hobbies",
+    )
+
+    assert len(results) >= 1
+    assert any("hiking" in r.content for r in results)
