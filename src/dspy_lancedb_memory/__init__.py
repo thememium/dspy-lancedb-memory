@@ -15,12 +15,17 @@ from .models import (
     MemoryType,
     PendingReconciliation,
     ReconciledMemory,
+    Scope,
+    ScopeLike,
 )
 from .reranking import LiteLLMReranker
+from .store import BoundMemoryStore, LanceDSPyMemoryStore
 
 __all__ = [
+    "BoundMemoryStore",
     "ExtractMemory",
     "ExtractMemoryOperations",
+    "LanceDSPyMemoryStore",
     "LiteLLMReranker",
     "Memories",
     "Memory",
@@ -33,5 +38,7 @@ __all__ = [
     "MemoryType",
     "PendingReconciliation",
     "ReconciledMemory",
+    "Scope",
+    "ScopeLike",
     "memory",
 ]

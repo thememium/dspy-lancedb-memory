@@ -4,7 +4,7 @@ from dataclasses import dataclass, field
 from enum import Enum
 from typing import Any
 
-from pydantic import BaseModel
+from pydantic import BaseModel, ConfigDict
 
 
 class MemoryType(Enum):
@@ -37,11 +37,28 @@ class MemoryType(Enum):
         return None
 
 
+class Scope(BaseModel):
+    """Typed helper for arbitrary custom memory ownership/query dimensions."""
+
+    model_config = ConfigDict(extra="allow")
+
+    def __init__(self, **data: Any) -> None:
+        super().__init__(**data)
+
+    def to_dict(self) -> dict[str, Any]:
+        """Return scope fields as a plain dict."""
+        return self.model_dump(mode="json")
+
+
+ScopeLike = Scope | BaseModel | dict[str, Any]
+"""Accepted input type for custom memory scope values."""
+
+
 class MemoryItem(BaseModel):
-    """One extracted memory returned by the LLM."""
+    """One extracted memory returned by LLM."""
 
     content: str
-    """The memory text — a concise, self-contained fact, preference, or event."""
+    """The memory text — concise, self-contained fact, preference, or event."""
 
     type: str
     """
@@ -49,6 +66,9 @@ class MemoryItem(BaseModel):
 
     Must be one of: preference, semantic, episodic, procedural, summary, artifact.
     """
+
+    metadata: dict[str, Any] = {}
+    """Optional structured data attached to this extracted memory."""
 
 
 class Memory(BaseModel):
@@ -88,6 +108,9 @@ class Memory(BaseModel):
     metadata: dict[str, Any]
     """Arbitrary structured data attached at write time."""
 
+    scope: dict[str, Any] = {}
+    """Custom ownership/query dimensions."""
+
     replaces_id: str | None = None
     """ID of the memory this record replaces (append-only history chain). ``None`` for original memories."""
 
@@ -124,7 +147,7 @@ class ReconciledMemory(BaseModel):
 
 @dataclass
 class PendingReconciliation:
-    """Holds a reconciliation decision until writes are applied.
+    """Holds reconciliation decision until writes are applied.
 
     Used by the two-phase parallel reconciliation pipeline:
     Phase 1 (parallel) populates this; Phase 2 (sequential) applies writes.
@@ -136,6 +159,7 @@ class PendingReconciliation:
     user_id: str
     session_id: str
     conversation_id: str
+    scope: dict[str, Any] = field(default_factory=dict)
     metadata: dict[str, Any] = field(default_factory=dict)
     existing_row: Memory | None = None
 
