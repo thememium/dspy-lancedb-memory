@@ -63,7 +63,22 @@ def store(tmp_path):
 class TestConstructorPaths:
     """Test constructor code paths for api_base/api_key handling."""
 
-    def test_constructor_with_embedding_lm_having_api_base(self, tmp_path):
+    def test_constructor_with_embedding_lm_none_creates_default(self, tmp_path):
+        """Test constructor with embedding_lm=None creates default dspy.LM (line 92)."""
+        mock_lm = SimpleNamespace(model="test-model", kwargs={})
+        mock_embedder = MagicMock()
+        mock_embedder.return_value = [[0.1, 0.2, 0.3]]
+
+        with patch("dspy_lancedb_memory.store.dspy.LM", return_value=mock_lm) as mock_lm_cls:
+            with patch("dspy_lancedb_memory.store.dspy.Embedder", return_value=mock_embedder):
+                store = LanceDSPyMemoryStore(
+                    uri=str(tmp_path),
+                    table_name="test_lm_none",
+                    embedding_lm=None,  # Pass None to trigger line 92
+                    embedding_dim=3,
+                    reranker=None,
+                )
+                mock_lm_cls.assert_called_once_with("openrouter/openai/text-embedding-3-small")
         """Test constructor extracts api_base from embedding_lm kwargs."""
         mock_embedder = MagicMock()
         mock_embedder.return_value = [[0.1, 0.2, 0.3]]
