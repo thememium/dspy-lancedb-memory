@@ -42,6 +42,9 @@ DSPy Memory is a persistent vector memory store for DSPy-powered AI agents. It u
 - **Structured memory taxonomy** — Six memory categories (preference, semantic, episodic, procedural, summary, artifact) for fine-grained organization
 - **Persistent vector storage** — LanceDB-backed with automatic text embeddings via the DSPy `Embedder`
 - **Semantic search** — Query memories by user ID, session ID, conversation ID, memory type, or natural language
+- **Hybrid search** — Combine vector similarity with full-text search for better recall on keyword-heavy queries
+- **Custom scope and metadata** — Attach arbitrary ownership dimensions and structured filters to every memory
+- **Bound stores** — ``store.with_scope()`` returns a ``BoundMemoryStore`` with user/session/scope pre-bound
 - **Optional reranking** — ``LiteLLMReranker`` wraps ``litellm.rerank()`` for cross-encoder reranking via Cohere, Jina, and any LiteLLM-compatible provider
 - **Full CRUD** — Create, search, update, and delete individual memories or batch-extract from conversations
 
@@ -275,7 +278,21 @@ project_store.create_memory(content="Project uses LanceDB.")
 project_store.search_memories(query="vector store")
 ```
 
-Metadata and scope filters support equality by default plus simple operators:
+Metadata and scope filters support equality by default plus the full set of comparison operators:
+
+| Operator | Description | Example |
+|---|---|---|
+| `eq` | Exact equality (default when no operator) | `{"status": {"eq": "active"}}` |
+| `neq` | Not equal | `{"status": {"neq": "archived"}}` |
+| `in` | Value is in a list | `{"priority": {"in": ["high", "urgent"]}}` |
+| `contains` | String substring or list/set membership | `{"tags": {"contains": "backend"}}` |
+| `gt` | Greater than | `{"confidence": {"gt": 0.9}}` |
+| `gte` | Greater than or equal | `{"confidence": {"gte": 0.8}}` |
+| `lt` | Less than | `{"age_days": {"lt": 30}}` |
+| `lte` | Less than or equal | `{"age_days": {"lte": 7}}` |
+| `exists` | Field is present (``True``) or absent (``False``) | `{"reviewed": {"exists": True}}` |
+
+Multiple operators on the same field are AND-ed together:
 
 ```python
 results = store.search_memories(
@@ -285,9 +302,36 @@ results = store.search_memories(
         "priority": {"in": ["high", "urgent"]},
         "confidence": {"gte": 0.8},
         "tags": {"contains": "backend"},
+        "reviewed": {"exists": True},
     },
 )
 ```
+
+### Hybrid Search
+
+Combine vector similarity with full-text search for better recall on keyword-heavy queries. A full-text search index on the ``content`` column is created automatically.
+
+```python
+results = store.search_memories(
+    user_id="user_123",
+    query="RAG pipeline configuration",
+    query_type="hybrid",   # combines vector + full-text search
+)
+```
+
+Use ``refine_factor`` to re-score hybrid candidates with a second vector pass — higher values improve ranking quality at the cost of latency:
+
+```python
+results = store.search_memories(
+    user_id="user_123",
+    query="RAG pipeline configuration",
+    query_type="hybrid",
+    refine_factor=10,      # re-rank top candidates with refined vectors
+    use_reranker=True,     # chain with cross-encoder reranking
+)
+```
+
+``refine_factor`` also works with the default ``query_type="vector"`` to refine pure vector results.
 
 ### Raw Store (No Extraction)
 
@@ -541,9 +585,16 @@ When storing directly (without extraction), the default type is `semantic`.
 | [`LiteLLMReranker`](#using-the-reranker) | Cross-encoder reranker via ``litellm.rerank()`` — supports Cohere, Jina, and any LiteLLM-compatible provider |
 | [`MemoryType`](#memory-taxonomy) | Enum of the six memory categories |
 | [`MemoryItem`](#extract-memories-from-conversation) | Pydantic model for extracted memories |
-| `Scope` | Typed helper for arbitrary custom scope fields |
-| `BoundMemoryStore` | Returned by ``store.with_scope(...)`` for pre-bound user/session/scope context |
+| [`Scope`](#custom-scope-and-metadata-filters) | Typed helper for arbitrary custom scope fields |
+| [`BoundMemoryStore`](#custom-scope-and-metadata-filters) | Returned by ``store.with_scope(...)`` for pre-bound user/session/scope context |
 | [`upsert_memory`](#upsert--insert-update-or-skip) | Semantic upsert — insert, update, or skip based on content similarity |
+| `list_memories` | Deterministic list with scope, metadata, and type filters — no vector search |
+| `get_memory` | Fetch a single memory by ID |
+| `get_memory_history` | Append-only version chain for a memory |
+| `delete_memories_by_search` | Semantic delete — find and soft-delete by query |
+| `process_memories` | Batch create/update/delete from extracted operations |
+| `update_memory_metadata` | Patch metadata on an existing memory (merge or replace) |
+| `update_memory_scope` | Patch scope on an existing memory |
 | `session_id` / `conversation_id` | Optional scoping fields on ``create_memory``, ``create_memories``, ``search_memories``, and ``upsert_memory`` |
 
 <p align="right">(<a href="#readme-top">back to top</a>)</p>
