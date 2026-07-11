@@ -265,3 +265,45 @@ class TestSearchWithReranker:
             query_type="hybrid",
         )
         assert isinstance(results, list)
+
+    def test_search_hybrid_with_reranker(self, tmp_path):
+        """Test hybrid search with reranker (line 926)."""
+        from unittest.mock import MagicMock
+
+        # Mock the reranker
+        mock_reranker = MagicMock()
+        mock_reranker.score = "relevance"
+
+        store = StubMemoryStoreWithReranker(
+            uri=str(tmp_path),
+            table_name="memories",
+            embeddings=EMBEDDINGS,
+            reranker=mock_reranker,
+        )
+
+        store.create_memory(
+            user_id="user-1",
+            content="favorite food is pizza",
+            memory_type="semantic",
+        )
+
+        # Mock the table.search to return a builder that supports rerank
+        mock_builder = MagicMock()
+        mock_builder.vector.return_value = mock_builder
+        mock_builder.text.return_value = mock_builder
+        mock_builder.rerank.return_value = mock_builder
+        mock_builder.where.return_value = mock_builder
+        mock_builder.limit.return_value = mock_builder
+        mock_builder.to_list.return_value = []
+
+        with patch.object(store.table, 'search', return_value=mock_builder):
+            results = store.search_memories(
+                user_id="user-1",
+                query="what food do I like",
+                query_type="hybrid",
+                use_reranker=True,
+            )
+
+        # Verify rerank was called (line 926)
+        mock_builder.rerank.assert_called_once_with(mock_reranker, query_string="what food do I like")
+        assert isinstance(results, list)
