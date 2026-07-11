@@ -6,6 +6,7 @@ from types import SimpleNamespace
 
 import dspy
 import pytest
+from unittest.mock import patch
 
 from dspy_lancedb_memory import config, memory
 
@@ -186,3 +187,76 @@ class TestMemoryStore:
             reranker=None,
         )
         assert store.rerank_limit_multiplier == 1
+
+    def test_store_with_reranker_lm_string_creates_litellm_reranker(self, tmp_path):
+        """Test Store() with reranker_lm string creates LiteLLMReranker."""
+        config._lm = SimpleNamespace(model="test-model")
+
+        with patch("dspy_lancedb_memory.memory.LiteLLMReranker") as mock_reranker:
+            mock_reranker.return_value = "mock-reranker"
+            store = memory.Store(
+                uri=str(tmp_path),
+                table_name="test",
+                embedding_lm=SimpleNamespace(model="test-embedding"),
+                embedding_dim=3,
+                reranker_lm="cohere/rerank-english-v3.0",
+            )
+            mock_reranker.assert_called_once_with(
+                model="cohere/rerank-english-v3.0",
+                column="content",
+            )
+            assert store.reranker == "mock-reranker"
+
+    def test_store_with_reranker_lm_dspy_lm_creates_litellm_reranker(self, tmp_path):
+        """Test Store() with reranker_lm as dspy.LM creates LiteLLMReranker."""
+        config._lm = SimpleNamespace(model="test-model")
+
+        with patch("dspy_lancedb_memory.memory.LiteLLMReranker") as mock_reranker:
+            mock_reranker.return_value = "mock-reranker"
+            # Use actual dspy.LM for reranker_lm to test the isinstance check
+            reranker_lm = dspy.LM("cohere/rerank-4-fast")
+            store = memory.Store(
+                uri=str(tmp_path),
+                table_name="test",
+                embedding_lm=SimpleNamespace(model="test-embedding"),
+                embedding_dim=3,
+                reranker_lm=reranker_lm,
+            )
+            # Should extract model string from dspy.LM
+            mock_reranker.assert_called_once()
+            call_kwargs = mock_reranker.call_args[1]
+            assert call_kwargs["model"] == "cohere/rerank-4-fast"
+            assert call_kwargs["column"] == "content"
+            assert store.reranker == "mock-reranker"
+
+    def test_store_with_config_reranker_lm(self, tmp_path):
+        """Test Store() uses config reranker_lm when not passed directly."""
+        config._lm = SimpleNamespace(model="test-model")
+        config._reranker_lm = "cohere/rerank-english-v3.0"
+
+        with patch("dspy_lancedb_memory.memory.LiteLLMReranker") as mock_reranker:
+            mock_reranker.return_value = "mock-reranker"
+            store = memory.Store(
+                uri=str(tmp_path),
+                table_name="test",
+                embedding_lm=SimpleNamespace(model="test-embedding"),
+                embedding_dim=3,
+            )
+            mock_reranker.assert_called_once_with(
+                model="cohere/rerank-english-v3.0",
+                column="content",
+            )
+            assert store.reranker == "mock-reranker"
+
+    def test_store_without_reranker_lm_returns_none(self, tmp_path):
+        """Test Store() without reranker_lm returns None reranker."""
+        config._lm = SimpleNamespace(model="test-model")
+        config._reranker_lm = None
+
+        store = memory.Store(
+            uri=str(tmp_path),
+            table_name="test",
+            embedding_lm=SimpleNamespace(model="test-embedding"),
+            embedding_dim=3,
+        )
+        assert store.reranker is None
