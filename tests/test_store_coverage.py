@@ -113,6 +113,21 @@ class TestJsonDict:
         result = LanceDSPyMemoryStore._json_dict([])
         assert result == {}
 
+    def test_json_dict_with_truthy_integer(self):
+        """Test _json_dict with truthy non-dict, non-string value (line 214)."""
+        result = LanceDSPyMemoryStore._json_dict(42)
+        assert result == {}
+
+    def test_json_dict_with_boolean_true(self):
+        """Test _json_dict with boolean True."""
+        result = LanceDSPyMemoryStore._json_dict(True)
+        assert result == {}
+
+    def test_json_dict_with_non_empty_list(self):
+        """Test _json_dict with non-empty list (truthy but not dict/string)."""
+        result = LanceDSPyMemoryStore._json_dict([1, 2, 3])
+        assert result == {}
+
 
 # ---------------------------------------------------------------------------
 # _matches_filter edge cases
@@ -1295,3 +1310,61 @@ def test_process_memories_empty_search_query_skips(store, monkeypatch):
 
     assert len(created) == 0
     assert len(deleted) == 0
+
+
+# ---------------------------------------------------------------------------
+# create_memories error cases (lines 792, 819)
+# ---------------------------------------------------------------------------
+
+
+def test_create_memories_extract_requires_contents(store):
+    """Test create_memories with extract=True requires contents (line 792)."""
+    with pytest.raises(ValueError, match="contents is required when extract=True"):
+        store.create_memories(
+            user_id="user-1",
+            contents=None,
+            extract=True,
+        )
+
+
+def test_create_memories_extract_requires_nonempty_contents(store):
+    """Test create_memories with extract=True requires non-empty contents."""
+    with pytest.raises(ValueError, match="contents is required when extract=True"):
+        store.create_memories(
+            user_id="user-1",
+            contents=[],
+            extract=True,
+        )
+
+
+def test_create_memories_verbatim_requires_single_item(store):
+    """Test create_memories with extract=False requires exactly one item (line 819)."""
+    with pytest.raises(ValueError, match="verbatim storage.*requires exactly one item"):
+        store.create_memories(
+            user_id="user-1",
+            contents=[
+                {"role": "user", "content": "item 1"},
+                {"role": "user", "content": "item 2"},
+            ],
+            extract=False,
+        )
+
+
+def test_create_memories_verbatim_requires_contents(store):
+    """Test create_memories with extract=False requires contents."""
+    with pytest.raises(ValueError, match="verbatim storage.*requires exactly one item"):
+        store.create_memories(
+            user_id="user-1",
+            contents=None,
+            extract=False,
+        )
+
+
+def test_create_memories_verbatim_with_empty_list(store):
+    """Test create_memories with extract=False requires non-empty contents."""
+    with pytest.raises(ValueError, match="verbatim storage.*requires exactly one item"):
+        store.create_memories(
+            user_id="user-1",
+            contents=[],
+            extract=False,
+        )
