@@ -24,7 +24,7 @@ _embedding_dim: int | None = None
 _uri: str = DEFAULT_URI
 _table_name: str = DEFAULT_TABLE_NAME
 _reranker_lm: dspy.LM | str | None = None
-_signature = None
+_signature: type[dspy.Signature] | None = None
 
 _configured: bool = False
 
