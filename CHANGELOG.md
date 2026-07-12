@@ -1,5 +1,22 @@
 # Changelog
 
+## v0.1.13 (2026-07-12)
+
+[Compare changes](https://github.com/thememium/dspy-lancedb-memory/compare/v0.1.12...v0.1.13)
+
+### 💅 Refactors
+
+- **dspy_lancedb_memory/config.py**: annotate _signature type ([790e20a](https://github.com/thememium/dspy-lancedb-memory/commit/790e20ae5cd1208144cf7147c3790598deb7633e))
+- **test**: clean up test suite imports and formatting ([b59ba81](https://github.com/thememium/dspy-lancedb-memory/commit/b59ba81b127214f3f7844c08f8753e31a1f51869))
+
+### ✅ Tests
+
+- improve coverage (#7) (#7) ([92089ea](https://github.com/thememium/dspy-lancedb-memory/commit/92089eaadd5c0c3123302377c28c85abb2117fe0))
+
+### Contributors
+
+- Edward Boswell <thememium@gmail.com>
+
 ## v0.1.12 (2026-07-11)
 
 [Compare changes](https://github.com/thememium/dspy-lancedb-memory/compare/v0.1.11...v0.1.12)
