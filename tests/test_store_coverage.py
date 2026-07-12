@@ -4,7 +4,6 @@ from __future__ import annotations
 
 import json
 from types import SimpleNamespace
-from unittest.mock import patch
 
 import dspy
 import pytest
@@ -75,10 +74,11 @@ def _active_rows(store: LanceDSPyMemoryStore) -> list[dict]:
 
 class TestJsonDict:
     def test_json_dict_with_dict_input(self):
-        result = LanceDSPyMemoryStore._json_dict({"key": "value"})
-        assert result == {"key": "value"}
+        d = {"key": "value"}
+        result = LanceDSPyMemoryStore._json_dict(d)
+        assert result == d
         # Should be a copy, not the same object
-        assert result is not {"key": "value"}
+        assert result is not d
 
     def test_json_dict_with_empty_dict(self):
         result = LanceDSPyMemoryStore._json_dict({})
@@ -187,13 +187,12 @@ class TestMatchesFilter:
 
     def test_contains_operator_with_string_not_matching(self):
         assert (
-            LanceDSPyMemoryStore._matches_filter("hello", {"contains": "world"}) is False
+            LanceDSPyMemoryStore._matches_filter("hello", {"contains": "world"})
+            is False
         )
 
     def test_contains_operator_with_non_container(self):
-        assert (
-            LanceDSPyMemoryStore._matches_filter(123, {"contains": "a"}) is False
-        )
+        assert LanceDSPyMemoryStore._matches_filter(123, {"contains": "a"}) is False
 
     def test_gt_operator_matching(self):
         assert LanceDSPyMemoryStore._matches_filter(10, {"gt": 5}) is True
@@ -220,19 +219,13 @@ class TestMatchesFilter:
         assert LanceDSPyMemoryStore._matches_filter(6, {"lte": 5}) is False
 
     def test_exists_operator_with_existing_value(self):
-        assert (
-            LanceDSPyMemoryStore._matches_filter("value", {"exists": True}) is True
-        )
+        assert LanceDSPyMemoryStore._matches_filter("value", {"exists": True}) is True
 
     def test_exists_operator_with_none(self):
-        assert (
-            LanceDSPyMemoryStore._matches_filter(None, {"exists": True}) is False
-        )
+        assert LanceDSPyMemoryStore._matches_filter(None, {"exists": True}) is False
 
     def test_exists_operator_with_false(self):
-        assert (
-            LanceDSPyMemoryStore._matches_filter(None, {"exists": False}) is True
-        )
+        assert LanceDSPyMemoryStore._matches_filter(None, {"exists": False}) is True
 
     def test_nested_dict_filter(self):
         value = {"nested": {"key": "value"}}
@@ -274,19 +267,12 @@ class TestMatchesFilter:
 
     def test_multiple_operators(self):
         assert (
-            LanceDSPyMemoryStore._matches_filter(
-                10, {"gte": 5, "lte": 15, "neq": 7}
-            )
+            LanceDSPyMemoryStore._matches_filter(10, {"gte": 5, "lte": 15, "neq": 7})
             is True
         )
 
     def test_multiple_operators_failing(self):
-        assert (
-            LanceDSPyMemoryStore._matches_filter(
-                10, {"gte": 5, "lte": 8}
-            )
-            is False
-        )
+        assert LanceDSPyMemoryStore._matches_filter(10, {"gte": 5, "lte": 8}) is False
 
 
 # ---------------------------------------------------------------------------
@@ -976,7 +962,7 @@ def test_get_or_create_table_with_dimension_mismatch(tmp_path):
         reranker=None,
     )
     # Override _embed to use our test embeddings
-    store2._embed = lambda text: different_embeddings.get(text, [0.5, 0.5])
+    store2._embed = lambda text: different_embeddings.get(text, [0.5, 0.5])  # ty:ignore[invalid-assignment]
     store2.table = store2._get_or_create_table()
 
     # Table should have been recreated with new dimension
@@ -1163,7 +1149,7 @@ def test_upsert_nonsemantic_exact_match_returns_existing(store):
 
 def test_upsert_nonsemantic_similarity_above_threshold_updates(store):
     """Test non-semantic upsert updates when similarity is above threshold."""
-    original = store.create_memory(
+    _original = store.create_memory(
         user_id="user-1",
         content="favorite food is pizza",
         memory_type="preference",

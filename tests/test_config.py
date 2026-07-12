@@ -53,9 +53,7 @@ class TestConfigure:
 
     def test_configure_extraction_lm_takes_precedence_over_model(self):
         lm = dspy.LM("openrouter/openai/gpt-4o-mini")
-        result = config.configure(
-            model="openrouter/openai/gpt-4o", extraction_lm=lm
-        )
+        result = config.configure(model="openrouter/openai/gpt-4o", extraction_lm=lm)
         assert result is lm
 
     def test_configure_sets_embedding_lm(self):

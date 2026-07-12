@@ -8,20 +8,11 @@ Covers:
 
 from __future__ import annotations
 
-import json
 from types import SimpleNamespace
-from dataclasses import dataclass, field
-from typing import Any
 
-import dspy
 import pytest
 
-from dspy_lancedb_memory.models import (
-    Memory,
-    MemoryType,
-    PendingReconciliation,
-    ReconciledMemory,
-)
+from dspy_lancedb_memory.models import PendingReconciliation, ReconciledMemory
 from dspy_lancedb_memory.store import LanceDSPyMemoryStore
 
 EMBEDDINGS: dict[str, list[float]] = {
@@ -293,7 +284,6 @@ def test_get_memory_history_forward_references(store):
     store.update_memory(memory_id=mem_a.id, content="hiking is my hobby")
     active_b = _active_rows(store)
     assert len(active_b) == 1
-    mem_b_id = active_b[0]["id"]
 
     # Now call get_memory_history starting from A
     # The changed loop should find B (which has replaces_id = A)
@@ -321,8 +311,6 @@ def test_get_memory_history_forward_references_from_oldest(store):
 
     # Update B -> C (C.replaces_id = B)
     store.update_memory(memory_id=mem_b_id, content="enjoys outdoor activities")
-    active_c = _active_rows(store)
-    mem_c_id = active_c[0]["id"]
 
     # Start from A (oldest) - should find B and C via forward references
     history = store.get_memory_history(memory_id=mem_a.id)

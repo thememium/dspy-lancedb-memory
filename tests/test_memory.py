@@ -3,10 +3,10 @@
 from __future__ import annotations
 
 from types import SimpleNamespace
+from unittest.mock import patch
 
 import dspy
 import pytest
-from unittest.mock import patch
 
 from dspy_lancedb_memory import config, memory
 
@@ -84,7 +84,7 @@ class TestMemoryConfigure:
 
 class TestMemoryStore:
     def test_store_with_explicit_params(self, tmp_path):
-        config._lm = SimpleNamespace(model="test-model")
+        config._lm = SimpleNamespace(model="test-model")  # ty:ignore[invalid-assignment]
         store = memory.Store(
             uri=str(tmp_path),
             table_name="test_memories",
@@ -99,8 +99,8 @@ class TestMemoryStore:
         config._uri = str(tmp_path)
         config._table_name = "from_config"
         config._embedding_dim = 3
-        config._lm = SimpleNamespace(model="test-model")
-        config._embedding_lm = SimpleNamespace(model="test-embedding")
+        config._lm = SimpleNamespace(model="test-model")  # ty:ignore[invalid-assignment]
+        config._embedding_lm = SimpleNamespace(model="test-embedding")  # ty:ignore[invalid-assignment]
 
         store = memory.Store(reranker=None)
         assert store.table_name == "from_config"
@@ -109,15 +109,15 @@ class TestMemoryStore:
         config._uri = str(tmp_path)
         config._table_name = "from_config"
         config._embedding_dim = 3
-        config._lm = SimpleNamespace(model="test-model")
-        config._embedding_lm = SimpleNamespace(model="test-embedding")
+        config._lm = SimpleNamespace(model="test-model")  # ty:ignore[invalid-assignment]
+        config._embedding_lm = SimpleNamespace(model="test-embedding")  # ty:ignore[invalid-assignment]
 
         store = memory.Store(table_name="explicit", reranker=None)
         assert store.table_name == "explicit"
 
     def test_store_with_reranker_lm_string(self, tmp_path):
-        config._lm = SimpleNamespace(model="test-model")
-        config._embedding_lm = SimpleNamespace(model="test-embedding")
+        config._lm = SimpleNamespace(model="test-model")  # ty:ignore[invalid-assignment]
+        config._embedding_lm = SimpleNamespace(model="test-embedding")  # ty:ignore[invalid-assignment]
         config._embedding_dim = 3
 
         # This will try to create a LiteLLMReranker but won't actually call it
@@ -130,7 +130,7 @@ class TestMemoryStore:
         assert store.reranker is None
 
     def test_store_with_signature(self, tmp_path):
-        config._lm = SimpleNamespace(model="test-model")
+        config._lm = SimpleNamespace(model="test-model")  # ty:ignore[invalid-assignment]
 
         class CustomSig(dspy.Signature):
             pass
@@ -146,7 +146,7 @@ class TestMemoryStore:
         assert store._extraction_signature is CustomSig
 
     def test_store_with_config_signature(self, tmp_path):
-        config._lm = SimpleNamespace(model="test-model")
+        config._lm = SimpleNamespace(model="test-model")  # ty:ignore[invalid-assignment]
 
         class ConfigSig(dspy.Signature):
             pass
@@ -163,7 +163,7 @@ class TestMemoryStore:
         assert store._extraction_signature is ConfigSig
 
     def test_store_with_rerank_limit_multiplier(self, tmp_path):
-        config._lm = SimpleNamespace(model="test-model")
+        config._lm = SimpleNamespace(model="test-model")  # ty:ignore[invalid-assignment]
 
         store = memory.Store(
             uri=str(tmp_path),
@@ -176,7 +176,7 @@ class TestMemoryStore:
         assert store.rerank_limit_multiplier == 5
 
     def test_store_rerank_limit_multiplier_minimum_is_one(self, tmp_path):
-        config._lm = SimpleNamespace(model="test-model")
+        config._lm = SimpleNamespace(model="test-model")  # ty:ignore[invalid-assignment]
 
         store = memory.Store(
             uri=str(tmp_path),
@@ -190,7 +190,7 @@ class TestMemoryStore:
 
     def test_store_with_reranker_lm_string_creates_litellm_reranker(self, tmp_path):
         """Test Store() with reranker_lm string creates LiteLLMReranker."""
-        config._lm = SimpleNamespace(model="test-model")
+        config._lm = SimpleNamespace(model="test-model")  # ty:ignore[invalid-assignment]
 
         with patch("dspy_lancedb_memory.memory.LiteLLMReranker") as mock_reranker:
             mock_reranker.return_value = "mock-reranker"
@@ -209,7 +209,7 @@ class TestMemoryStore:
 
     def test_store_with_reranker_lm_dspy_lm_with_api_base_and_key(self, tmp_path):
         """Test Store() with reranker_lm as dspy.LM with api_base and api_key."""
-        config._lm = SimpleNamespace(model="test-model")
+        config._lm = SimpleNamespace(model="test-model")  # ty:ignore[invalid-assignment]
 
         with patch("dspy_lancedb_memory.memory.LiteLLMReranker") as mock_reranker:
             mock_reranker.return_value = "mock-reranker"
@@ -237,7 +237,7 @@ class TestMemoryStore:
 
     def test_store_with_config_reranker_lm(self, tmp_path):
         """Test Store() uses config reranker_lm when not passed directly."""
-        config._lm = SimpleNamespace(model="test-model")
+        config._lm = SimpleNamespace(model="test-model")  # ty:ignore[invalid-assignment]
         config._reranker_lm = "cohere/rerank-english-v3.0"
 
         with patch("dspy_lancedb_memory.memory.LiteLLMReranker") as mock_reranker:
@@ -256,7 +256,7 @@ class TestMemoryStore:
 
     def test_store_without_reranker_lm_returns_none(self, tmp_path):
         """Test Store() without reranker_lm returns None reranker."""
-        config._lm = SimpleNamespace(model="test-model")
+        config._lm = SimpleNamespace(model="test-model")  # ty:ignore[invalid-assignment]
         config._reranker_lm = None
 
         store = memory.Store(

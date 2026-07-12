@@ -2,14 +2,12 @@
 
 from __future__ import annotations
 
-from types import SimpleNamespace
 from unittest.mock import MagicMock, patch
 
 import pyarrow as pa
 import pytest
 
 from dspy_lancedb_memory.reranking import LiteLLMReranker
-
 
 # ---------------------------------------------------------------------------
 # Fixtures
@@ -123,7 +121,9 @@ class TestRerank:
             ]
         }
 
-        with patch("dspy_lancedb_memory.reranking.rerank", return_value=mock_response) as mock_rerank:
+        with patch(
+            "dspy_lancedb_memory.reranking.rerank", return_value=mock_response
+        ) as mock_rerank:
             result = reranker._rerank(sample_table, "test query")
 
         # Should pass api_base and api_key to litellm.rerank
@@ -134,7 +134,9 @@ class TestRerank:
         assert "_relevance_score" in result.column_names
 
     def test_rerank_with_openrouter_model(self, sample_table):
-        reranker = LiteLLMReranker(model="openrouter/cohere/rerank-4-fast", column="content")
+        reranker = LiteLLMReranker(
+            model="openrouter/cohere/rerank-4-fast", column="content"
+        )
 
         mock_response = {
             "results": [
@@ -144,9 +146,7 @@ class TestRerank:
             ]
         }
 
-        with patch.object(
-            reranker, "_rerank_openrouter", return_value=mock_response
-        ):
+        with patch.object(reranker, "_rerank_openrouter", return_value=mock_response):
             result = reranker._rerank(sample_table, "test query")
 
         assert "_relevance_score" in result.column_names
@@ -166,9 +166,7 @@ class TestRerank:
             ]
         }
 
-        with patch.object(
-            reranker, "_rerank_custom_api", return_value=mock_response
-        ):
+        with patch.object(reranker, "_rerank_custom_api", return_value=mock_response):
             result = reranker._rerank(sample_table, "test query")
 
         assert "_relevance_score" in result.column_names
@@ -213,8 +211,12 @@ class TestRerankOpenrouter:
         }
         mock_response.raise_for_status = MagicMock()
 
-        with patch("dspy_lancedb_memory.reranking.os.environ.get", return_value="test-key"):
-            with patch("dspy_lancedb_memory.reranking.httpx.post", return_value=mock_response) as mock_post:
+        with patch(
+            "dspy_lancedb_memory.reranking.os.environ.get", return_value="test-key"
+        ):
+            with patch(
+                "dspy_lancedb_memory.reranking.httpx.post", return_value=mock_response
+            ) as mock_post:
                 result = reranker._rerank_openrouter("test query", ["doc1", "doc2"])
 
         assert result["results"][0]["relevance_score"] == 0.9
@@ -229,8 +231,12 @@ class TestRerankOpenrouter:
         mock_response.json.return_value = {"results": []}
         mock_response.raise_for_status = MagicMock()
 
-        with patch("dspy_lancedb_memory.reranking.os.environ.get", return_value="test-key"):
-            with patch("dspy_lancedb_memory.reranking.httpx.post", return_value=mock_response) as mock_post:
+        with patch(
+            "dspy_lancedb_memory.reranking.os.environ.get", return_value="test-key"
+        ):
+            with patch(
+                "dspy_lancedb_memory.reranking.httpx.post", return_value=mock_response
+            ) as mock_post:
                 reranker._rerank_openrouter("query", ["doc1"])
 
         call_args = mock_post.call_args
@@ -264,7 +270,9 @@ class TestRerankCustomApi:
         }
         mock_response.raise_for_status = MagicMock()
 
-        with patch("dspy_lancedb_memory.reranking.httpx.post", return_value=mock_response) as mock_post:
+        with patch(
+            "dspy_lancedb_memory.reranking.httpx.post", return_value=mock_response
+        ) as mock_post:
             result = reranker._rerank_custom_api("query", ["doc1"])
 
         assert result["results"][0]["relevance_score"] == 0.9
@@ -282,7 +290,9 @@ class TestRerankCustomApi:
         mock_response.json.return_value = {"results": []}
         mock_response.raise_for_status = MagicMock()
 
-        with patch("dspy_lancedb_memory.reranking.httpx.post", return_value=mock_response) as mock_post:
+        with patch(
+            "dspy_lancedb_memory.reranking.httpx.post", return_value=mock_response
+        ) as mock_post:
             reranker._rerank_custom_api("query", ["doc1"])
 
         call_args = mock_post.call_args
@@ -299,7 +309,9 @@ class TestRerankCustomApi:
         mock_response.json.return_value = {"results": []}
         mock_response.raise_for_status = MagicMock()
 
-        with patch("dspy_lancedb_memory.reranking.httpx.post", return_value=mock_response) as mock_post:
+        with patch(
+            "dspy_lancedb_memory.reranking.httpx.post", return_value=mock_response
+        ) as mock_post:
             reranker._rerank_custom_api("query", ["doc1"])
 
         call_args = mock_post.call_args
@@ -315,7 +327,9 @@ class TestRerankCustomApi:
         mock_response.json.return_value = {"results": []}
         mock_response.raise_for_status = MagicMock()
 
-        with patch("dspy_lancedb_memory.reranking.httpx.post", return_value=mock_response) as mock_post:
+        with patch(
+            "dspy_lancedb_memory.reranking.httpx.post", return_value=mock_response
+        ) as mock_post:
             reranker._rerank_custom_api("query", ["doc1"])
 
         call_args = mock_post.call_args
@@ -387,7 +401,11 @@ class TestRerankInterface:
             with patch.object(reranker, "_rerank") as mock_rerank:
                 merged = pa.table(
                     {
-                        "content": ["test content 1", "test content 2", "test content 3"],
+                        "content": [
+                            "test content 1",
+                            "test content 2",
+                            "test content 3",
+                        ],
                         "id": ["id1", "id2", "id3"],
                         "_distance": [0.1, 0.2, 0.3],
                     }
@@ -403,13 +421,19 @@ class TestRerankInterface:
                 with patch.object(reranker, "_keep_relevance_score") as mock_keep:
                     final_table = pa.table(
                         {
-                            "content": ["test content 1", "test content 2", "test content 3"],
+                            "content": [
+                                "test content 1",
+                                "test content 2",
+                                "test content 3",
+                            ],
                             "id": ["id1", "id2", "id3"],
                             "_relevance_score": [0.95, 0.85, 0.75],
                         }
                     )
                     mock_keep.return_value = final_table
-                    result = reranker.rerank_hybrid("query", sample_table, sample_fts_table)
+                    _result = reranker.rerank_hybrid(
+                        "query", sample_table, sample_fts_table
+                    )
 
         # When score="relevance", merge_results should be called (not _merge_and_keep_scores)
         mock_merge.assert_called_once()

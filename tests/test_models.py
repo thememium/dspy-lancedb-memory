@@ -8,15 +8,12 @@ from dspy_lancedb_memory.models import (
     Memory,
     MemoryItem,
     MemoryOperation,
-    MemoryOperations,
     MemoryType,
     PendingReconciliation,
     ReconciledMemory,
     Scope,
-    ScopeLike,
     memory_type_from_string,
 )
-
 
 # ---------------------------------------------------------------------------
 # MemoryType._missing_() — lines 34-37
@@ -102,7 +99,7 @@ class TestScope:
 
     def test_scope_with_extra_fields(self):
         scope = Scope(custom_field="value")
-        assert scope.custom_field == "value"
+        assert getattr(scope, "custom_field") == "value"
         assert scope.to_dict() == {"custom_field": "value"}
 
 
@@ -117,9 +114,7 @@ class TestMemoryItem:
         assert item.metadata == {}
 
     def test_memory_item_with_metadata(self):
-        item = MemoryItem(
-            content="test", type="semantic", metadata={"source": "chat"}
-        )
+        item = MemoryItem(content="test", type="semantic", metadata={"source": "chat"})
         assert item.metadata == {"source": "chat"}
 
 

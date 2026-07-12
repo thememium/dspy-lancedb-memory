@@ -8,12 +8,9 @@ from __future__ import annotations
 from types import SimpleNamespace
 from unittest.mock import MagicMock, patch
 
-import dspy
 import pytest
 
-from dspy_lancedb_memory.reranking import LiteLLMReranker
 from dspy_lancedb_memory.store import LanceDSPyMemoryStore
-
 
 EMBEDDINGS: dict[str, list[float]] = {
     "test content": [0.5, 0.5, 0.0],
@@ -69,16 +66,22 @@ class TestConstructorPaths:
         mock_embedder = MagicMock()
         mock_embedder.return_value = [[0.1, 0.2, 0.3]]
 
-        with patch("dspy_lancedb_memory.store.dspy.LM", return_value=mock_lm) as mock_lm_cls:
-            with patch("dspy_lancedb_memory.store.dspy.Embedder", return_value=mock_embedder):
-                store = LanceDSPyMemoryStore(
+        with patch(
+            "dspy_lancedb_memory.store.dspy.LM", return_value=mock_lm
+        ) as mock_lm_cls:
+            with patch(
+                "dspy_lancedb_memory.store.dspy.Embedder", return_value=mock_embedder
+            ):
+                _store = LanceDSPyMemoryStore(
                     uri=str(tmp_path),
                     table_name="test_lm_none",
                     embedding_lm=None,  # Pass None to trigger line 92
                     embedding_dim=3,
                     reranker=None,
                 )
-                mock_lm_cls.assert_called_once_with("openrouter/openai/text-embedding-3-small")
+                mock_lm_cls.assert_called_once_with(
+                    "openrouter/openai/text-embedding-3-small"
+                )
 
     def test_constructor_with_embedding_dim_none_infers_dim(self, tmp_path):
         """Test constructor with embedding_dim=None infers dimension (line 116)."""
@@ -88,7 +91,9 @@ class TestConstructorPaths:
         mock_embedder.return_value = [[0.1, 0.2, 0.3, 0.4]]
 
         with patch("dspy_lancedb_memory.store.dspy.LM", return_value=mock_lm):
-            with patch("dspy_lancedb_memory.store.dspy.Embedder", return_value=mock_embedder):
+            with patch(
+                "dspy_lancedb_memory.store.dspy.Embedder", return_value=mock_embedder
+            ):
                 store = LanceDSPyMemoryStore(
                     uri=str(tmp_path),
                     table_name="test_dim_none",
@@ -106,7 +111,9 @@ class TestConstructorPaths:
         mock_embedder.return_value = [[0.1, 0.2, 0.3]]
 
         with patch("dspy_lancedb_memory.store.dspy.LM", return_value=mock_lm):
-            with patch("dspy_lancedb_memory.store.dspy.Embedder", return_value=mock_embedder):
+            with patch(
+                "dspy_lancedb_memory.store.dspy.Embedder", return_value=mock_embedder
+            ):
                 store = LanceDSPyMemoryStore(
                     uri=str(tmp_path),
                     table_name="test_embed",
@@ -126,7 +133,9 @@ class TestConstructorPaths:
         mock_embedder.return_value = [[0.1, 0.2, 0.3], [0.4, 0.5, 0.6]]
 
         with patch("dspy_lancedb_memory.store.dspy.LM", return_value=mock_lm):
-            with patch("dspy_lancedb_memory.store.dspy.Embedder", return_value=mock_embedder):
+            with patch(
+                "dspy_lancedb_memory.store.dspy.Embedder", return_value=mock_embedder
+            ):
                 store = LanceDSPyMemoryStore(
                     uri=str(tmp_path),
                     table_name="test_embed_many",
@@ -146,9 +155,11 @@ class TestConstructorPaths:
         mock_embedder.return_value = [[0.1, 0.2, 0.3]]
 
         with patch("dspy_lancedb_memory.store.dspy.LM", return_value=mock_lm):
-            with patch("dspy_lancedb_memory.store.dspy.Embedder", return_value=mock_embedder):
+            with patch(
+                "dspy_lancedb_memory.store.dspy.Embedder", return_value=mock_embedder
+            ):
                 # First store creates the table with dimension 3
-                store1 = LanceDSPyMemoryStore(
+                _store1 = LanceDSPyMemoryStore(
                     uri=str(tmp_path),
                     table_name="test_infer_dim",
                     embedding_lm=mock_lm,
@@ -170,12 +181,14 @@ class TestConstructorPaths:
         mock_embedder = MagicMock()
         mock_embedder.return_value = [[0.1, 0.2, 0.3]]
 
-        with patch("dspy_lancedb_memory.store.dspy.Embedder", return_value=mock_embedder) as mock_cls:
+        with patch(
+            "dspy_lancedb_memory.store.dspy.Embedder", return_value=mock_embedder
+        ) as mock_cls:
             embedding_lm = SimpleNamespace(
                 model="huggingface/test-model",
                 kwargs={"api_base": "http://custom.api"},
             )
-            store = LanceDSPyMemoryStore(
+            _store = LanceDSPyMemoryStore(
                 uri=str(tmp_path),
                 table_name="test_api_base",
                 embedding_lm=embedding_lm,
@@ -194,12 +207,14 @@ class TestConstructorPaths:
         mock_embedder = MagicMock()
         mock_embedder.return_value = [[0.1, 0.2, 0.3]]
 
-        with patch("dspy_lancedb_memory.store.dspy.Embedder", return_value=mock_embedder) as mock_cls:
+        with patch(
+            "dspy_lancedb_memory.store.dspy.Embedder", return_value=mock_embedder
+        ) as mock_cls:
             embedding_lm = SimpleNamespace(
                 model="test-model",
                 kwargs={"api_key": "test-key-123"},
             )
-            store = LanceDSPyMemoryStore(
+            _store = LanceDSPyMemoryStore(
                 uri=str(tmp_path),
                 table_name="test_api_key",
                 embedding_lm=embedding_lm,
@@ -217,12 +232,14 @@ class TestConstructorPaths:
         mock_embedder = MagicMock()
         mock_embedder.return_value = [[0.1, 0.2, 0.3]]
 
-        with patch("dspy_lancedb_memory.store.dspy.Embedder", return_value=mock_embedder) as mock_cls:
+        with patch(
+            "dspy_lancedb_memory.store.dspy.Embedder", return_value=mock_embedder
+        ) as mock_cls:
             embedding_lm = SimpleNamespace(
                 model="huggingface/embedding-model",
                 kwargs={"api_base": "http://localhost:8080", "api_key": "my-key"},
             )
-            store = LanceDSPyMemoryStore(
+            _store = LanceDSPyMemoryStore(
                 uri=str(tmp_path),
                 table_name="test_both",
                 embedding_lm=embedding_lm,
@@ -241,12 +258,14 @@ class TestConstructorPaths:
         mock_embedder = MagicMock()
         mock_embedder.return_value = [[0.1, 0.2, 0.3]]
 
-        with patch("dspy_lancedb_memory.store.dspy.Embedder", return_value=mock_embedder) as mock_cls:
+        with patch(
+            "dspy_lancedb_memory.store.dspy.Embedder", return_value=mock_embedder
+        ) as mock_cls:
             embedding_lm = SimpleNamespace(
                 model="openai/text-embedding-3-small",
                 kwargs={},
             )
-            store = LanceDSPyMemoryStore(
+            _store = LanceDSPyMemoryStore(
                 uri=str(tmp_path),
                 table_name="test_no_rewrite",
                 embedding_lm=embedding_lm,
@@ -264,12 +283,14 @@ class TestConstructorPaths:
         mock_embedder = MagicMock()
         mock_embedder.return_value = [[0.1, 0.2, 0.3]]
 
-        with patch("dspy_lancedb_memory.store.dspy.Embedder", return_value=mock_embedder) as mock_cls:
+        with patch(
+            "dspy_lancedb_memory.store.dspy.Embedder", return_value=mock_embedder
+        ) as mock_cls:
             embedding_lm = SimpleNamespace(
                 model="text-embedding-3-small",  # No slash
                 kwargs={"api_base": "http://custom.api"},
             )
-            store = LanceDSPyMemoryStore(
+            _store = LanceDSPyMemoryStore(
                 uri=str(tmp_path),
                 table_name="test_no_slash",
                 embedding_lm=embedding_lm,
@@ -383,7 +404,7 @@ class TestSearchWithReranker:
         mock_builder.limit.return_value = mock_builder
         mock_builder.to_list.return_value = []
 
-        with patch.object(store.table, 'search', return_value=mock_builder):
+        with patch.object(store.table, "search", return_value=mock_builder):
             results = store.search_memories(
                 user_id="user-1",
                 query="what food do I like",
@@ -392,5 +413,7 @@ class TestSearchWithReranker:
             )
 
         # Verify rerank was called (line 926)
-        mock_builder.rerank.assert_called_once_with(mock_reranker, query_string="what food do I like")
+        mock_builder.rerank.assert_called_once_with(
+            mock_reranker, query_string="what food do I like"
+        )
         assert isinstance(results, list)

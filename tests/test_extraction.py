@@ -3,18 +3,13 @@
 from __future__ import annotations
 
 import dspy
-import pytest
 
 from dspy_lancedb_memory.extraction import (
-    ExtractMemory,
-    ExtractMemoryOperations,
     MemoryExtractor,
     MemoryOperationExtractor,
     MemoryReconciler,
-    ReconcileMemory,
 )
 from dspy_lancedb_memory.models import MemoryItem, MemoryOperation, ReconciledMemory
-
 
 # ---------------------------------------------------------------------------
 # MemoryOperationExtractor.forward()
@@ -35,7 +30,7 @@ class TestMemoryOperationExtractor:
                 ]
             )
 
-        extractor.extract = mock_extract
+        extractor.extract = mock_extract  # ty:ignore[invalid-assignment]
         result = extractor.forward([{"role": "user", "content": "test"}])
 
         ops = result.operations
@@ -56,7 +51,7 @@ class TestMemoryOperationExtractor:
                 ]
             )
 
-        extractor.extract = mock_extract
+        extractor.extract = mock_extract  # ty:ignore[invalid-assignment]
         result = extractor.forward([{"role": "user", "content": "test"}])
 
         ops = result.operations
@@ -71,7 +66,7 @@ class TestMemoryOperationExtractor:
                 operations=MemoryOperation(action="create", content="test")
             )
 
-        extractor.extract = mock_extract
+        extractor.extract = mock_extract  # ty:ignore[invalid-assignment]
         result = extractor.forward([{"role": "user", "content": "test"}])
 
         ops = result.operations
@@ -84,7 +79,7 @@ class TestMemoryOperationExtractor:
         def mock_extract(messages):
             return dspy.Prediction(operations=None)
 
-        extractor.extract = mock_extract
+        extractor.extract = mock_extract  # ty:ignore[invalid-assignment]
         result = extractor.forward([{"role": "user", "content": "test"}])
 
         ops = result.operations
@@ -96,7 +91,7 @@ class TestMemoryOperationExtractor:
         def mock_extract(messages):
             return dspy.Prediction(operations=[])
 
-        extractor.extract = mock_extract
+        extractor.extract = mock_extract  # ty:ignore[invalid-assignment]
         result = extractor.forward([{"role": "user", "content": "test"}])
 
         ops = result.operations
@@ -120,7 +115,7 @@ class TestMemoryExtractor:
                 ]
             )
 
-        extractor.extract = mock_extract
+        extractor.extract = mock_extract  # ty:ignore[invalid-assignment]
         result = extractor.forward([{"role": "user", "content": "test"}])
 
         memories = result.memories
@@ -138,7 +133,7 @@ class TestMemoryExtractor:
                 memories=MemoryItem(content="single item", type="semantic")
             )
 
-        extractor.extract = mock_extract
+        extractor.extract = mock_extract  # ty:ignore[invalid-assignment]
         result = extractor.forward([{"role": "user", "content": "test"}])
 
         memories = result.memories
@@ -157,7 +152,7 @@ class TestMemoryExtractor:
                 ]
             )
 
-        extractor.extract = mock_extract
+        extractor.extract = mock_extract  # ty:ignore[invalid-assignment]
         result = extractor.forward([{"role": "user", "content": "test"}])
 
         memories = result.memories
@@ -178,7 +173,7 @@ class TestMemoryExtractor:
                 ]
             )
 
-        extractor.extract = mock_extract
+        extractor.extract = mock_extract  # ty:ignore[invalid-assignment]
         result = extractor.forward([{"role": "user", "content": "test"}])
 
         memories = result.memories
@@ -194,7 +189,7 @@ class TestMemoryExtractor:
             delattr(item, "metadata")
             return dspy.Prediction(memories=[item])
 
-        extractor.extract = mock_extract
+        extractor.extract = mock_extract  # ty:ignore[invalid-assignment]
         result = extractor.forward([{"role": "user", "content": "test"}])
 
         memories = result.memories
@@ -211,7 +206,7 @@ class TestMemoryExtractor:
             item.__dict__["metadata"] = None
             return dspy.Prediction(memories=[item])
 
-        extractor.extract = mock_extract
+        extractor.extract = mock_extract  # ty:ignore[invalid-assignment]
         result = extractor.forward([{"role": "user", "content": "test"}])
 
         memories = result.memories
@@ -238,7 +233,7 @@ class TestMemoryReconciler:
                 )
             )
 
-        reconciler.reconcile = mock_reconcile
+        reconciler.reconcile = mock_reconcile  # ty:ignore[invalid-assignment]
         result = reconciler.forward(
             new_memory_content="test",
             new_memory_type="semantic",
@@ -263,7 +258,7 @@ class TestMemoryReconciler:
                 )
             )
 
-        reconciler.reconcile = mock_reconcile
+        reconciler.reconcile = mock_reconcile  # ty:ignore[invalid-assignment]
         result = reconciler.forward(
             new_memory_content="test",
             new_memory_type="semantic",
@@ -288,7 +283,7 @@ class TestMemoryReconciler:
                 )
             )
 
-        reconciler.reconcile = mock_reconcile
+        reconciler.reconcile = mock_reconcile  # ty:ignore[invalid-assignment]
         result = reconciler.forward(
             new_memory_content="new content",
             new_memory_type="semantic",
@@ -311,7 +306,7 @@ class TestMemoryReconciler:
                 )
             )
 
-        reconciler.reconcile = mock_reconcile
+        reconciler.reconcile = mock_reconcile  # ty:ignore[invalid-assignment]
         result = reconciler.forward(
             new_memory_content="test",
             new_memory_type="semantic",
@@ -335,7 +330,7 @@ class TestMemoryReconciler:
                 )
             )
 
-        reconciler.reconcile = mock_reconcile
+        reconciler.reconcile = mock_reconcile  # ty:ignore[invalid-assignment]
         result = reconciler.forward(
             new_memory_content="test",
             new_memory_type="semantic",
@@ -357,7 +352,7 @@ class TestMemoryReconciler:
                 )
             )
 
-        reconciler.reconcile = mock_reconcile
+        reconciler.reconcile = mock_reconcile  # ty:ignore[invalid-assignment]
         result = reconciler.forward(
             new_memory_content="test",
             new_memory_type="semantic",
@@ -382,7 +377,7 @@ class TestMemoryReconciler:
                 )
             )
 
-        reconciler.reconcile = mock_reconcile
+        reconciler.reconcile = mock_reconcile  # ty:ignore[invalid-assignment]
         result = reconciler.forward(
             new_memory_content="new memory content",
             new_memory_type="semantic",
@@ -405,12 +400,16 @@ class TestMemoryReconciler:
                 )
             )
 
-        reconciler.reconcile = mock_reconcile
+        reconciler.reconcile = mock_reconcile  # ty:ignore[invalid-assignment]
         result = reconciler.forward(
             new_memory_content="test",
             new_memory_type="semantic",
             existing_memories=[
-                {"id": "existing-id", "content": "existing content", "type": "preference"}
+                {
+                    "id": "existing-id",
+                    "content": "existing content",
+                    "type": "preference",
+                }
             ],
         )
 
@@ -430,7 +429,7 @@ class TestMemoryReconciler:
                 )
             )
 
-        reconciler.reconcile = mock_reconcile
+        reconciler.reconcile = mock_reconcile  # ty:ignore[invalid-assignment]
         result = reconciler.forward(
             new_memory_content="test",
             new_memory_type="episodic",
@@ -452,7 +451,7 @@ class TestMemoryReconciler:
                 )
             )
 
-        reconciler.reconcile = mock_reconcile
+        reconciler.reconcile = mock_reconcile  # ty:ignore[invalid-assignment]
         result = reconciler.forward(
             new_memory_content="test",
             new_memory_type="episodic",
@@ -476,7 +475,7 @@ class TestMemoryReconciler:
                 )
             )
 
-        reconciler.reconcile = mock_reconcile
+        reconciler.reconcile = mock_reconcile  # ty:ignore[invalid-assignment]
         result = reconciler.forward(
             new_memory_content="test",
             new_memory_type="episodic",
