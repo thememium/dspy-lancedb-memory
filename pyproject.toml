@@ -17,7 +17,7 @@ classifiers = [
 dependencies = [
   "dspy[openai]>=3.5.0",
   "httpx>=0.28.1",
-  "lancedb>=0.25.3",
+  "lancedb>=0.41.0",
   "pyarrow>=26.0.1",
   "pydantic>=2.14.3",
 ]
