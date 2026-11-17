@@ -401,7 +401,7 @@ class TestToMemory:
             "_distance": 0.3,
         }
         memory = LanceDSPyMemoryStore._to_memory(row)
-        assert memory.relevance_score == pytest.approx(0.7)
+        assert memory.relevance_score == pytest.approx(1.0 / 1.3)
 
     def test_to_memory_without_scores(self):
         row = {
@@ -437,11 +437,11 @@ class TestFilterByRelevance:
 
     def test_filter_with_distance(self):
         results = [
-            {"_distance": 0.1},  # score = 0.9
-            {"_distance": 0.5},  # score = 0.5
-            {"_distance": 0.8},  # score = 0.2
+            {"_distance": 0.1},  # score ≈ 0.91
+            {"_distance": 0.5},  # score ≈ 0.67
+            {"_distance": 0.8},  # score ≈ 0.56
         ]
-        filtered = LanceDSPyMemoryStore._filter_by_relevance(results, 0.6)
+        filtered = LanceDSPyMemoryStore._filter_by_relevance(results, 0.7)
         assert len(filtered) == 1
         assert filtered[0]["_distance"] == 0.1
 

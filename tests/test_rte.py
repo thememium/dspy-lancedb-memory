@@ -187,3 +187,151 @@ def test_atexit_flush_skips_collected_store(tmp_path):
     gc.collect()
 
     callback()  # must not raise
+
+
+def test_two_stores_share_one_rte_writer(tmp_path):
+    """Multiple stores on the same dataset must not fence each other."""
+    uri = str(tmp_path)
+    first = StubStore(uri=uri)
+    second = StubStore(uri=uri)
+
+    assert first.table is second.table
+
+    first.create_memory(user_id="u1", content="favorite food is pizza")
+    second.create_memory(user_id="u1", content="I love hiking")
+
+    contents = {m.content for m in first.list_memories(user_id="u1")}
+    assert contents == {"favorite food is pizza", "I love hiking"}
+
+
+def test_table_cache_key_for_object_store():
+    store = object.__new__(LanceDSPyMemoryStore)
+    store.table_uri = "s3://bucket/db"
+    store.table_name = "memories"
+
+    assert store._table_cache_key() == ("s3://bucket/db", "memories")
+
+
+def test_dimension_mismatch_without_cached_handle(tmp_path):
+    uri = str(tmp_path)
+    first = StubStore(uri=uri)
+    first.create_memory(user_id="u1", content="I love hiking")
+
+    # Simulate a second process opening the on-disk table.
+    from dspy_lancedb_memory import store as store_module
+
+    store_module._TABLE_CACHE.pop((uri, "memories"), None)
+
+    second = LanceDSPyMemoryStore(
+        uri=uri,
+        table_name="memories",
+        embedding_lm=SimpleNamespace(model="test-embedding-model"),
+        embedding_dim=2,
+        reranker=None,
+    )
+
+    assert second.embedding_dim == 2
+    assert second.table.schema.field("vector").type.list_size == 2
+
+
+def test_importance_from_metadata_variants():
+    from dspy_lancedb_memory.store import LanceDSPyMemoryStore
+
+    assert LanceDSPyMemoryStore._importance_from_metadata(None) == 0.5
+    assert LanceDSPyMemoryStore._importance_from_metadata('{"_importance": 2.0}') == 1.0
+    assert (
+        LanceDSPyMemoryStore._importance_from_metadata('{"importance": "high"}') == 0.85
+    )
+    assert (
+        LanceDSPyMemoryStore._importance_from_metadata('{"importance": "unknown"}')
+        == 0.5
+    )
+    assert LanceDSPyMemoryStore._importance_from_metadata("not json") == 0.5
+    assert LanceDSPyMemoryStore._importance_from_metadata(["not", "a", "dict"]) == 0.5
+    assert LanceDSPyMemoryStore._importance_from_metadata({"_importance": -1}) == 0.0
+
+
+def test_type_defaults_for_legacy_columns():
+    from dspy_lancedb_memory.store import LanceDSPyMemoryStore
+
+    assert LanceDSPyMemoryStore._type_default(pa.string()) == ""
+    assert LanceDSPyMemoryStore._type_default(pa.large_string()) == ""
+    assert LanceDSPyMemoryStore._type_default(pa.bool_()) is False
+    assert LanceDSPyMemoryStore._type_default(pa.int64()) == 0
+    assert LanceDSPyMemoryStore._type_default(pa.float32()) == 0.0
+    assert LanceDSPyMemoryStore._type_default(pa.list_(pa.float32(), 3)) == [
+        0.0,
+        0.0,
+        0.0,
+    ]
+    assert LanceDSPyMemoryStore._type_default(pa.list_(pa.float32())) == []
+    assert LanceDSPyMemoryStore._type_default(pa.struct([("x", pa.int64())])) is None
+
+
+def test_defaults_for_legacy_fields():
+    from dspy_lancedb_memory.store import LanceDSPyMemoryStore
+
+    row = {"content": "hello", "metadata": '{"_importance": "low"}'}
+    assert (
+        LanceDSPyMemoryStore._default_for_field(
+            pa.field("search_text", pa.string(), nullable=True), row
+        )
+        == "hello"
+    )
+    assert (
+        LanceDSPyMemoryStore._default_for_field(
+            pa.field("last_accessed_at", pa.string(), nullable=True), row
+        )
+        is None
+    )
+    assert (
+        LanceDSPyMemoryStore._default_for_field(
+            pa.field("access_count", pa.int64(), nullable=True), row
+        )
+        is None
+    )
+    assert (
+        LanceDSPyMemoryStore._default_for_field(
+            pa.field("importance", pa.float32(), nullable=True), row
+        )
+        == 0.3
+    )
+    assert (
+        LanceDSPyMemoryStore._default_for_field(
+            pa.field("unknown", pa.string(), nullable=True), row
+        )
+        is None
+    )
+    assert (
+        LanceDSPyMemoryStore._default_for_field(
+            pa.field("required_count", pa.int64(), nullable=False), row
+        )
+        == 0
+    )
+
+
+def test_carry_legacy_fields_preserves_access_stats():
+    from dspy_lancedb_memory.store import LanceDSPyMemoryStore
+
+    old = {
+        "search_text": "enriched",
+        "last_accessed_at": "2026-01-01",
+        "access_count": 7,
+    }
+    new: dict = {}
+    LanceDSPyMemoryStore._carry_legacy_fields(new, old, keep_search_text=True)
+    assert new == old
+
+    new = {"search_text": "new content"}
+    LanceDSPyMemoryStore._carry_legacy_fields(new, old, keep_search_text=False)
+    assert new["search_text"] == "new content"
+    assert new["access_count"] == 7
+    assert new["last_accessed_at"] == "2026-01-01"
+
+    empty: dict = {}
+    LanceDSPyMemoryStore._carry_legacy_fields(
+        empty,
+        {"search_text": None, "last_accessed_at": None, "access_count": None},
+        keep_search_text=True,
+    )
+    assert empty == {}
