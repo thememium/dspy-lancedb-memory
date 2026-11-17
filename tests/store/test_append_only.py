@@ -1,0 +1,398 @@
+from __future__ import annotations
+
+from types import SimpleNamespace
+
+import dspy
+import pytest
+
+from dspy_lancedb_memory.store import LanceDSPyMemoryStore, rows
+
+EMBEDDINGS: dict[str, list[float]] = {
+    "favorite food is pizza": [1.0, 0.0, 0.0],
+    "their favorite food is pizza": [1.0, 0.0, 0.0],
+    "favorite food is pepperoni pizza": [0.95, 0.05, 0.0],
+    "favorite color is blue": [0.99, 0.01, 0.0],
+    "favorite color is red": [0.99, 0.01, 0.0],
+    "favorite programming language is python": [0.0, 1.0, 0.0],
+    "name is Edward": [0.9, 0.1, 0.0],
+    "name is Edward Boswell": [0.88, 0.12, 0.0],
+    "I love hiking": [0.0, 0.0, 1.0],
+    "hiking is my hobby": [0.0, 0.0, 0.95],
+    "enjoys outdoor activities": [0.0, 0.1, 0.9],
+    "what are hobbies": [0.0, 0.05, 0.95],
+    "what food do I like": [0.95, 0.0, 0.05],
+    "car color is blue": [0.0, 0.5, 0.5],
+    "car color is red": [0.0, 0.5, 0.5],
+    # skip-threshold test vectors — L2 distance ≈ 0.057 with "I love hiking" (1 - dist ≈ 0.94)
+    "hiking is enjoyable": [0.05, 0.02, 0.98],
+    # skip-threshold test vectors — L2 distance ≈ 0.028 with "car color is blue" (1 - dist ≈ 0.97)
+    "vehicle color blue": [0.02, 0.48, 0.5],
+    # skip-threshold test vector — L2 distance ≈ 0.094 with "car color is blue" (1 - dist ≈ 0.91, >= 0.85 skip)
+    "my car is blue": [0.08, 0.45, 0.5],
+    "hiking": [0.0, 0.05, 0.95],
+    # For reconciler test — similar to "name is Edward" but not identical
+    "my name is edward": [0.85, 0.15, 0.0],
+}
+
+
+class StubMemoryStore(LanceDSPyMemoryStore):
+    def __init__(
+        self, *, uri: str, table_name: str, embeddings: dict[str, list[float]]
+    ):
+        self._embeddings = embeddings
+        super().__init__(
+            uri=uri,
+            table_name=table_name,
+            embedding_lm=SimpleNamespace(model="test-embedding-model"),
+            embedding_dim=3,
+            reranker=None,
+        )
+
+    def _embed(self, text: str) -> list[float]:
+        return self._embeddings[text]
+
+
+@pytest.fixture
+def store(tmp_path: pytest.TempPathFactory) -> LanceDSPyMemoryStore:
+    return StubMemoryStore(
+        uri=str(tmp_path),
+        table_name="memories",
+        embeddings=EMBEDDINGS,
+    )
+
+
+def _rows(store: LanceDSPyMemoryStore) -> list[dict]:
+    return store.table.search().where("id != '__seed__'").to_list()
+
+
+def _active_rows(store: LanceDSPyMemoryStore) -> list[dict]:
+    return store.table.search().where("id != '__seed__' AND is_active = true").to_list()
+
+
+def _row_by_id(store: LanceDSPyMemoryStore, memory_id: str) -> dict:
+    return next(row for row in _rows(store) if row["id"] == memory_id)
+
+
+# ---------------------------------------------------------------------------
+# Regression tests — capture CURRENT behavior before refactoring
+# ---------------------------------------------------------------------------
+
+
+def test_regression_update_memory_preserves_id(
+    store: LanceDSPyMemoryStore,
+) -> None:
+    original = store.create_memory(
+        user_id="user-1",
+        content="favorite food is pizza",
+        memory_type="semantic",
+    )
+
+    store.update_memory(
+        memory_id=original.id,
+        content="favorite color is blue",
+    )
+
+    updated = _row_by_id(store, original.id)
+    assert updated["id"] == original.id
+
+
+def test_regression_update_memory_row_count_unchanged(
+    store: LanceDSPyMemoryStore,
+) -> None:
+    store.create_memory(
+        user_id="user-1",
+        content="favorite food is pizza",
+        memory_type="semantic",
+    )
+    assert len(_rows(store)) == 1
+
+    store.update_memory(
+        memory_id=_rows(store)[0]["id"],
+        content="favorite color is blue",
+    )
+
+    # Append-only: old row is inactive, new row is active — total rows = 2
+    assert len(_rows(store)) == 2
+    assert len(_active_rows(store)) == 1
+
+
+def test_regression_update_memory_changes_content(
+    store: LanceDSPyMemoryStore,
+) -> None:
+    original = store.create_memory(
+        user_id="user-1",
+        content="favorite food is pizza",
+        memory_type="semantic",
+    )
+
+    store.update_memory(
+        memory_id=original.id,
+        content="favorite color is blue",
+    )
+
+    active = _active_rows(store)
+    assert len(active) == 1
+    assert active[0]["content"] == "favorite color is blue"
+    assert active[0]["replaces_id"] == original.id
+
+
+# ---------------------------------------------------------------------------
+# Append-only semantics tests — verify NEW behavior
+# ---------------------------------------------------------------------------
+
+
+def test_append_only_update_creates_new_record(
+    store: LanceDSPyMemoryStore,
+) -> None:
+    """AC1: update_memory() creates a new record and supersedes the old one.
+
+    After update: total row count +1, old record inactive, new record active
+    with replaces_id pointing to the old record.
+    """
+    original = store.create_memory(
+        user_id="user-1",
+        content="favorite food is pizza",
+        memory_type="semantic",
+    )
+    assert len(_rows(store)) == 1
+    assert len(_active_rows(store)) == 1
+
+    store.update_memory(
+        memory_id=original.id,
+        content="favorite food is pepperoni pizza",
+    )
+
+    assert len(_rows(store)) == 2
+    assert len(_active_rows(store)) == 1
+
+    old = _row_by_id(store, original.id)
+    assert old["is_active"] is False
+
+    active = _active_rows(store)
+    new = active[0]
+    assert new["is_active"] is True
+    assert new["content"] == "favorite food is pepperoni pizza"
+    assert new["replaces_id"] == original.id
+
+
+def test_append_only_search_excludes_superseded_records(
+    store: LanceDSPyMemoryStore,
+) -> None:
+    """AC2: search_memories() returns only active records, excluding superseded ones."""
+    original = store.create_memory(
+        user_id="user-1",
+        content="favorite food is pizza",
+        memory_type="preference",
+    )
+
+    store.update_memory(
+        memory_id=original.id,
+        content="favorite food is pepperoni pizza",
+    )
+
+    results = store.search_memories(
+        user_id="user-1",
+        query="what food do I like",
+    )
+
+    result_ids = [r.id for r in results]
+    assert original.id not in result_ids
+    assert len(results) == 1
+    assert results[0].content == "favorite food is pepperoni pizza"
+
+
+def test_append_only_delete_soft_deletes(
+    store: LanceDSPyMemoryStore,
+) -> None:
+    """AC3: delete_memory() soft-deletes — row still exists, is_active=False,
+    excluded from search."""
+    memory = store.create_memory(
+        user_id="user-1",
+        content="I love hiking",
+        memory_type="semantic",
+    )
+    assert len(_rows(store)) == 1
+
+    store.delete_memory(memory_id=memory.id)
+
+    assert len(_rows(store)) == 1
+
+    row = _row_by_id(store, memory.id)
+    assert row["is_active"] is False
+
+    results = store.search_memories(
+        user_id="user-1",
+        query="what are hobbies",
+    )
+    result_ids = [r.id for r in results]
+    assert memory.id not in result_ids
+
+
+def test_append_only_many_to_one_consolidation(
+    store: LanceDSPyMemoryStore,
+) -> None:
+    """AC4: A single new record with replaces_id='["id1","id2"]' can supersede
+    multiple predecessors. Both old records become inactive."""
+    import json
+
+    mem_a = store.create_memory(
+        user_id="user-1",
+        content="car color is blue",
+        memory_type="semantic",
+    )
+    mem_b = store.create_memory(
+        user_id="user-1",
+        content="car color is red",
+        memory_type="semantic",
+    )
+    assert len(_rows(store)) == 2
+    assert len(_active_rows(store)) == 2
+
+    new_row = rows.build_memory_row(
+        embed=store._embed,
+        user_id="user-1",
+        content="favorite food is pizza",
+        memory_type="semantic",
+        metadata=None,
+    )
+    new_row["replaces_id"] = json.dumps([mem_a.id, mem_b.id])
+    store.table.add([new_row])
+
+    store.delete_memory(memory_id=mem_a.id)
+    store.delete_memory(memory_id=mem_b.id)
+
+    assert len(_rows(store)) == 3
+    assert len(_active_rows(store)) == 1
+
+    assert _row_by_id(store, mem_a.id)["is_active"] is False
+    assert _row_by_id(store, mem_b.id)["is_active"] is False
+
+    active = _active_rows(store)
+    assert active[0]["is_active"] is True
+    replaces_ids = json.loads(active[0]["replaces_id"])
+    assert set(replaces_ids) == {mem_a.id, mem_b.id}
+
+
+def test_append_only_upsert_update_path_is_append_only(
+    store: LanceDSPyMemoryStore,
+) -> None:
+    """AC5: upsert_memory() "update" path is append-only — creates a new row
+    and deactivates the old one."""
+    original = store.create_memory(
+        user_id="user-1",
+        content="favorite food is pizza",
+        memory_type="semantic",
+    )
+    assert len(_rows(store)) == 1
+
+    result = store.upsert_memory(
+        user_id="user-1",
+        content="favorite food is pepperoni pizza",
+        memory_type="semantic",
+        similarity_threshold=0.85,
+        use_reconciler=False,
+    )
+
+    assert result.id != original.id
+    assert len(_rows(store)) == 2
+    assert len(_active_rows(store)) == 1
+
+    assert _row_by_id(store, original.id)["is_active"] is False
+
+    assert result.is_active is True
+    assert result.replaces_id == original.id
+
+
+def test_append_only_process_memories_delete_is_soft(
+    store: LanceDSPyMemoryStore,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """AC6: process_memories() "delete" action performs a soft delete — row
+    still exists with is_active=False."""
+    from dspy_lancedb_memory.models import MemoryOperation
+
+    memory = store.create_memory(
+        user_id="user-1",
+        content="I love hiking",
+        memory_type="semantic",
+    )
+    assert len(_rows(store)) == 1
+
+    class StubDeleteExtractor:
+        def __call__(self, *, messages):
+            return dspy.Prediction(
+                operations=[
+                    MemoryOperation(
+                        action="delete",
+                        content="I love hiking",
+                        search_query="hiking hobby",
+                    )
+                ]
+            )
+
+        def forward(self, messages):
+            raise AssertionError("forward() should not be called directly")
+
+    monkeypatch.setattr(
+        "dspy_lancedb_memory.store.process.MemoryOperationExtractor",
+        StubDeleteExtractor,
+    )
+
+    _created, deleted = store.process_memories(
+        user_id="user-1",
+        contents=[{"role": "user", "content": "I no longer enjoy hiking"}],
+        extract=True,
+    )
+
+    assert len(deleted) >= 1
+    assert len(_rows(store)) == 1
+
+    row = _row_by_id(store, memory.id)
+    assert row["is_active"] is False
+
+    results = store.search_memories(
+        user_id="user-1",
+        query="what are hobbies",
+    )
+    result_ids = [r.id for r in results]
+    assert memory.id not in result_ids
+
+
+def test_append_only_history_chain_walkability(
+    store: LanceDSPyMemoryStore,
+) -> None:
+    """AC8: Follow replaces_id backward through 2+ hops: A → B (replaces A)
+    → C (replaces B). Starting from C, walk back to A."""
+    mem_a = store.create_memory(
+        user_id="user-1",
+        content="I love hiking",
+        memory_type="semantic",
+    )
+
+    store.update_memory(
+        memory_id=mem_a.id,
+        content="hiking is my hobby",
+    )
+    active_after_b = _active_rows(store)
+    assert len(active_after_b) == 1
+    mem_b = SimpleNamespace(**active_after_b[0])
+    assert mem_b.replaces_id == mem_a.id
+
+    store.update_memory(
+        memory_id=mem_b.id,
+        content="enjoys outdoor activities",
+    )
+    active_after_c = _active_rows(store)
+    assert len(active_after_c) == 1
+    mem_c = SimpleNamespace(**active_after_c[0])
+    assert mem_c.replaces_id == mem_b.id
+
+    chain = [mem_c.id]
+    current = _row_by_id(store, mem_c.id)
+    while current.get("replaces_id"):
+        chain.append(current["replaces_id"])
+        current = _row_by_id(store, current["replaces_id"])
+
+    assert chain == [mem_c.id, mem_b.id, mem_a.id]
+    assert current["id"] == mem_a.id
+    assert current["replaces_id"] is None
