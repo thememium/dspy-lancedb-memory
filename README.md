@@ -45,7 +45,7 @@ DSPy Memory is a persistent vector memory store for DSPy-powered AI agents. It u
 - **Hybrid search** — Combine vector similarity with full-text search for better recall on keyword-heavy queries
 - **Custom scope and metadata** — Attach arbitrary ownership dimensions and structured filters to every memory
 - **Bound stores** — ``store.with_scope()`` returns a ``BoundMemoryStore`` with user/session/scope pre-bound
-- **Optional reranking** — ``LiteLLMReranker`` wraps ``litellm.rerank()`` for cross-encoder reranking via Cohere, Jina, and any LiteLLM-compatible provider
+- **Optional reranking** — ``LiteLLMReranker`` calls Cohere-compatible ``/rerank`` endpoints (Cohere, Jina, Voyage, Together, Fireworks, OpenRouter, or any custom endpoint) over plain HTTP
 - **Full CRUD** — Create, search, update, and delete individual memories or batch-extract from conversations
 
 <p align="right">(<a href="#readme-top">back to top</a>)</p>
@@ -56,17 +56,18 @@ DSPy Memory is a persistent vector memory store for DSPy-powered AI agents. It u
 
 ### Prerequisites
 
-Set the API key environment variable for your chosen provider. LiteLLM routes to the correct key automatically based on the model prefix:
+Set the API key environment variable for your chosen provider. Provider prefixes select the matching key:
 
 ```bash
 # Examples — set whichever matches your provider
 export OPENAI_API_KEY="sk-..."
 export ANTHROPIC_API_KEY="sk-ant-..."
-export CO_API_KEY="..."            # Cohere reranker
+export COHERE_API_KEY="..."        # Cohere reranker (CO_API_KEY also accepted)
 export JINA_API_KEY="..."          # Jina reranker
+export VOYAGE_API_KEY="..."        # Voyage reranker
 ```
 
-If you use a proxy or gateway (e.g. OpenRouter, LiteLLM proxy), set the base URL and key:
+If you use a proxy or gateway (e.g. OpenRouter, a LiteLLM proxy), set the base URL and key:
 
 ```bash
 export OPENAI_API_BASE="https://openrouter.ai/api/v1"
@@ -103,7 +104,7 @@ import dspy
 memory.configure(
     extraction_lm=dspy.LM("openai/gpt-4o-mini"),
     embedding_lm=dspy.LM("openai/text-embedding-3-small"),
-    reranker_lm=dspy.LM("cohere/rerank-4-fast"),   # optional — omit to disable
+    reranker_lm=dspy.LM("cohere/rerank-4-fast"),  # optional — omit to disable
 )
 
 # Create a store — picks up all defaults from configure()
@@ -128,7 +129,7 @@ store.create_memory(
 # Search memories (with reranking)
 results = store.search_memories(
     user_id="user_123",
-    session_id="session_abc",   # optional — narrow to a session
+    session_id="session_abc",  # optional — narrow to a session
     query="What does Edward prefer?",
     use_reranker=True,
 )
@@ -150,8 +151,8 @@ messages = [
     {
         "role": "user",
         "content": "I really like using DSPy signatures instead of writing prompts by hand. "
-                   "I'm building a CLI tool to organize my digital bookmarks by topic. "
-                   "The PR is at github.com/example/bookmark-organizer/pull/42.",
+        "I'm building a CLI tool to organize my digital bookmarks by topic. "
+        "The PR is at github.com/example/bookmark-organizer/pull/42.",
     },
 ]
 
@@ -188,7 +189,7 @@ results = store.search_memories(
     query="What are Edward's tool preferences?",
     memory_type="preference",  # optional filter
     limit=5,
-    use_reranker=True,         # uses configured reranker endpoint
+    use_reranker=True,  # uses configured reranker endpoint
 )
 ```
 
@@ -315,7 +316,7 @@ Combine vector similarity with full-text search for better recall on keyword-hea
 results = store.search_memories(
     user_id="user_123",
     query="RAG pipeline configuration",
-    query_type="hybrid",   # combines vector + full-text search
+    query_type="hybrid",  # combines vector + full-text search
 )
 ```
 
@@ -326,8 +327,8 @@ results = store.search_memories(
     user_id="user_123",
     query="RAG pipeline configuration",
     query_type="hybrid",
-    refine_factor=10,      # re-rank top candidates with refined vectors
-    use_reranker=True,     # chain with cross-encoder reranking
+    refine_factor=10,  # re-rank top candidates with refined vectors
+    use_reranker=True,  # chain with cross-encoder reranking
 )
 ```
 
@@ -437,8 +438,8 @@ messages = [
     {
         "role": "user",
         "content": "I really like using DSPy signatures instead of writing prompts by hand. "
-                   "I'm working on a RAG pipeline for my thesis on climate modeling. "
-                   "The PR is at github.com/example/climate-rag/pull/42.",
+        "I'm working on a RAG pipeline for my thesis on climate modeling. "
+        "The PR is at github.com/example/climate-rag/pull/42.",
     },
 ]
 
@@ -484,8 +485,8 @@ from dspy_lancedb_memory import LiteLLMReranker
 
 reranker = LiteLLMReranker(
     model="cohere/rerank-english-v3.0",
-    column="content",               # LanceDB column to rerank against
-    top_n=20,                       # optional: limit reranked candidates
+    column="content",  # LanceDB column to rerank against
+    top_n=20,  # optional: limit reranked candidates
 )
 
 store = memory.Store(reranker=reranker)
@@ -493,7 +494,11 @@ store = memory.Store(reranker=reranker)
 
 The model string uses the same ``provider/model`` format as ``dspy.LM`` — e.g.
 ``"cohere/rerank-english-v3.0"``, ``"jina/jina-reranker-v2-base-multilingual"``.
-LiteLLM handles the routing.
+Built-in endpoints cover ``cohere``, ``jina``, ``together_ai``, ``voyage``,
+``fireworks_ai``, and ``openrouter``; the provider prefix also selects the
+matching API-key environment variable. OpenRouter models need no prefix:
+``"cohere/rerank-4-fast"`` routes to OpenRouter automatically, while Cohere's
+direct naming (``"cohere/rerank-v4.0-fast"``) goes to Cohere.
 
 ### Custom API Base and Key
 
@@ -527,9 +532,9 @@ memory.configure(
 )
 ```
 
-LiteLLM automatically routes to the correct provider based on the model prefix. If your
-provider is not in LiteLLM's built-in list, ``LiteLLMReranker`` falls back to calling a
-Cohere-compatible ``/rerank`` endpoint on your ``api_base``.
+When ``api_base`` is set it always wins: ``LiteLLMReranker`` posts to
+``{api_base}/rerank`` and sends ``api_key`` (or the provider's environment
+variable) as a bearer token.
 
 ### Custom Configuration
 
@@ -540,12 +545,12 @@ from dspy_lancedb_memory import memory
 import dspy
 
 memory.configure(
-    extraction_lm=dspy.LM("anthropic/claude-sonnet-4-20250514"),           # extraction LM
-    embedding_lm=dspy.LM("openai/text-embedding-3-small"),              # embedding LM
-    embedding_dim=1536,                                                             # must match
-    reranker_lm=dspy.LM("cohere/rerank-4-fast"),                         # reranker model
-    uri=".my_memories",                                                              # LanceDB path
-    table_name="user_memories",                                                      # LanceDB table
+    extraction_lm=dspy.LM("anthropic/claude-sonnet-4-20250514"),  # extraction LM
+    embedding_lm=dspy.LM("openai/text-embedding-3-small"),  # embedding LM
+    embedding_dim=1536,  # must match
+    reranker_lm=dspy.LM("cohere/rerank-4-fast"),  # reranker model
+    uri=".my_memories",  # LanceDB path
+    table_name="user_memories",  # LanceDB table
 )
 
 store = memory.Store()  # everything inherited from configure()
@@ -582,7 +587,7 @@ When storing directly (without extraction), the default type is `semantic`.
 |---|---|
 | [`memory`](#basic-usage) | SDK module — ``memory.configure()`` and ``memory.Store()`` |
 | [`MemoryExtractor`](#extract-memories-from-conversation) | DSPy `ChainOfThought` module for memory extraction |
-| [`LiteLLMReranker`](#using-the-reranker) | Cross-encoder reranker via ``litellm.rerank()`` — supports Cohere, Jina, and any LiteLLM-compatible provider |
+| [`LiteLLMReranker`](#using-the-reranker) | HTTP cross-encoder reranker — Cohere, Jina, Voyage, Together, Fireworks, OpenRouter, or any Cohere-compatible endpoint |
 | [`MemoryType`](#memory-taxonomy) | Enum of the six memory categories |
 | [`MemoryItem`](#extract-memories-from-conversation) | Pydantic model for extracted memories |
 | [`Scope`](#custom-scope-and-metadata-filters) | Typed helper for arbitrary custom scope fields |
