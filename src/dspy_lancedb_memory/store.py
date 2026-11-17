@@ -2,7 +2,7 @@ import json
 import logging
 import re
 import uuid
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 from difflib import SequenceMatcher
 from typing import Any, cast
 
@@ -98,8 +98,8 @@ class LanceDSPyMemoryStore:
             embedder_kwargs["api_key"] = lm_kwargs["api_key"]
         # When api_base is set the target is an OpenAI-compatible server,
         # so force the ``openai/`` provider prefix regardless of the original
-        # model string (e.g. ``huggingface/…``).  LiteLLM's HuggingFace
-        # handler builds a provider-specific URL that 404s on custom servers.
+        # model string (e.g. ``huggingface/…``).  ``dspy.Embedder`` only accepts
+        # OpenAI/Azure hosted models and would reject the provider prefix.
         embedder_model = embedding_lm.model
         if "api_base" in embedder_kwargs and "/" in embedder_model:
             embedder_model = "openai/" + embedder_model.split("/", 1)[1]
@@ -305,9 +305,7 @@ class LanceDSPyMemoryStore:
         scope_filter = cls._scope_dict(scope)
         if scope_filter and not cls._matches_filter(row_scope, scope_filter):
             return False
-        if metadata_filter and not cls._matches_filter(metadata, metadata_filter):
-            return False
-        return True
+        return not metadata_filter or cls._matches_filter(metadata, metadata_filter)
 
     @classmethod
     def _filter_rows_by_json_fields(
@@ -404,9 +402,12 @@ class LanceDSPyMemoryStore:
         # Skip the write unless the new content is genuinely richer or replaces
         # a specific slot value (e.g. "color is blue" → "color is red").
         # This prevents runaway duplicate memories across repeated upsert runs.
-        if cosine_similarity >= skip_threshold:
-            if not new_is_richer and not same_slot_replacement:
-                return "skip"
+        if (
+            cosine_similarity >= skip_threshold
+            and not new_is_richer
+            and not same_slot_replacement
+        ):
+            return "skip"
 
         same_fact = (
             (prefix >= 2 and jaccard >= 0.5)
@@ -470,8 +471,8 @@ class LanceDSPyMemoryStore:
                     "memory_type": "seed",
                     "content": "seed",
                     "metadata": "{}",
-                    "created_at": datetime.now(timezone.utc).isoformat(),
-                    "updated_at": datetime.now(timezone.utc).isoformat(),
+                    "created_at": datetime.now(UTC).isoformat(),
+                    "updated_at": datetime.now(UTC).isoformat(),
                     "replaces_id": None,
                     "is_active": True,
                     "vector": [0.0] * self.embedding_dim,
@@ -503,7 +504,7 @@ class LanceDSPyMemoryStore:
         metadata: dict[str, Any] | None,
         scope: ScopeLike | None = None,
     ) -> dict[str, Any]:
-        now = datetime.now(timezone.utc).isoformat()
+        now = datetime.now(UTC).isoformat()
         resolved_type = memory_type_from_string(memory_type)
         type_value = (
             resolved_type.value
@@ -1569,7 +1570,7 @@ class BoundMemoryStore:
         self.user_id = user_id
         self.session_id = session_id
         self.conversation_id = conversation_id
-        self.scope = dict(scope or {})
+        self.scope = LanceDSPyMemoryStore._scope_dict(scope)
 
     def _scope(self, scope: ScopeLike | None = None) -> dict[str, Any]:
         merged = dict(self.scope)
