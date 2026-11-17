@@ -29,15 +29,15 @@ from typing import Any
 import dspy
 from lancedb.rerankers import Reranker
 
-from dspy_lancedb_memory.config import DEFAULT_EMBEDDING_MODEL
-from dspy_lancedb_memory.config import configure as _configure
 from dspy_lancedb_memory.config import (
+    DEFAULT_EMBEDDING_MODEL,
     get_configured_lm,
     get_embedding_config,
     get_reranker_lm_config,
     get_signature_config,
     get_store_config,
 )
+from dspy_lancedb_memory.config import configure as _configure
 from dspy_lancedb_memory.reranking import LiteLLMReranker
 from dspy_lancedb_memory.store import LanceDSPyMemoryStore
 
