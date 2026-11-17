@@ -15,12 +15,11 @@ classifiers = [
   "Topic :: Software Development :: Libraries :: Python Modules",
 ]
 dependencies = [
-  "dspy>=3.2.0",
+  "dspy[openai]>=3.5.0",
   "httpx>=0.28.1",
-  "lancedb<=0.25.3",
-  "litellm>=1.82.6",
-  "pyarrow>=24.0.0",
-  "pydantic>=2.13.3",
+  "lancedb>=0.25.3",
+  "pyarrow>=26.0.1",
+  "pydantic>=2.14.3",
 ]
 license = "MIT"
 license-files = ["LICEN[CS]E*"]
@@ -39,13 +38,13 @@ build-backend = "uv_build"
 [dependency-groups]
 dev = [
   "deptry>=0.25.1",
-  "isort>=8.0.1",
-  "poethepoet>=0.45.0",
-  "pytest>=9.0.3",
+  "isort>=9.0.2",
+  "poethepoet>=0.49.0",
+  "pytest>=9.2.0",
   "pytest-cov>=7.1.0",
-  "ruff>=0.15.12",
-  "ty>=0.0.34",
-  "usechange>=0.1.43",
+  "ruff>=0.17.5",
+  "ty>=0.0.104",
+  "usechange>=0.1.49",
 ]
 
 [tool.pytest.ini_options]
@@ -53,6 +52,9 @@ filterwarnings = ["ignore:.*prefix.*:DeprecationWarning:dspy.*"]
 
 [tool.deptry]
 known_first_party = ["dspy_lancedb_memory"]
+
+[tool.coverage.report]
+fail_under = 100
 
 [tool.poe.tasks]
 dev = "uv run example.py"
