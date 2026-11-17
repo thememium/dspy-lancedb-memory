@@ -3,6 +3,7 @@ import json
 import logging
 import os
 import re
+import threading
 import uuid
 import weakref
 from datetime import UTC, datetime
@@ -42,22 +43,11 @@ _SEMANTIC_DUPLICATE_STOPWORDS = frozenset(
     {"a", "an", "the", "their", "his", "her", "our", "my", "your"}
 )
 
-# Columns accepted by ``merge_insert``; search-only columns (``_distance``,
-# ``_score``, ``_relevance_score``) are dropped before a write.
-_WRITE_COLUMNS = (
-    "id",
-    "user_id",
-    "session_id",
-    "conversation_id",
-    "memory_type",
-    "content",
-    "metadata",
-    "created_at",
-    "updated_at",
-    "replaces_id",
-    "is_active",
-    "vector",
-)
+# Embedded RTE allows one writer per shard per dataset.  Multiple stores for
+# the same (uri, table) must share one table handle or their writers fence
+# each other with increasing epochs.
+_TABLE_CACHE: dict[tuple[str, str], Any] = {}
+_TABLE_CACHE_LOCK = threading.RLock()
 
 
 class _SingleMemoryReconciler:
@@ -106,6 +96,7 @@ class LanceDSPyMemoryStore:
         rte_durable_write: bool = False,
     ):
         self.db = lancedb.connect(uri)
+        self.table_uri = uri
         self.table_name = table_name
         self.embedding_dim = embedding_dim
         self.rerank_limit_multiplier = max(rerank_limit_multiplier, 1)
@@ -436,7 +427,7 @@ class LanceDSPyMemoryStore:
             new_normalized in existing_normalized
             or existing_normalized in new_normalized
         )
-        cosine_similarity = 1.0 - distance
+        cosine_similarity = cls._distance_to_similarity(distance)
         same_slot_replacement = prefix >= max(
             2, min(len(new_tokens), len(existing_tokens)) - 1
         )
@@ -471,48 +462,75 @@ class LanceDSPyMemoryStore:
 
         return "update" if new_is_richer or same_slot_replacement else "skip"
 
+    def _table_cache_key(self) -> tuple[str, str]:
+        if "://" in self.table_uri:
+            return (self.table_uri, self.table_name)
+        return (os.path.abspath(self.table_uri), self.table_name)
+
     def _get_or_create_table(self):
         assert self.embedding_dim is not None, (
             "embedding_dim must be set before creating table"
         )
-        if self.table_name in self.db.list_tables():
-            table = self.db.open_table(self.table_name)
-            existing_dim = self._get_vector_dim(table)
-            if existing_dim is not None and existing_dim != self.embedding_dim:
-                logger.warning(
-                    "Table %r vector dimension (%d) does not match embedding_dim (%d); "
-                    "dropping and recreating.",
-                    self.table_name,
-                    existing_dim,
-                    self.embedding_dim,
-                )
-                self.db.drop_table(self.table_name)
-            else:
-                self._ensure_fts_index(table)
-                self._ensure_rte(table)
-                return table
+        key = self._table_cache_key()
+        with _TABLE_CACHE_LOCK:
+            table = _TABLE_CACHE.get(key)
+            if table is not None:
+                existing_dim = self._get_vector_dim(table)
+                if existing_dim is not None and existing_dim != self.embedding_dim:
+                    logger.warning(
+                        "Table %r vector dimension (%d) does not match "
+                        "embedding_dim (%d); dropping and recreating.",
+                        self.table_name,
+                        existing_dim,
+                        self.embedding_dim,
+                    )
+                    self.db.drop_table(self.table_name)
+                    _TABLE_CACHE.pop(key, None)
+                else:
+                    self._ensure_fts_index(table)
+                    self._ensure_rte(table)
+                    return table
 
-        schema = pa.schema(
-            [
-                pa.field("id", pa.string(), nullable=False),
-                pa.field("user_id", pa.string()),
-                pa.field("session_id", pa.string()),
-                pa.field("conversation_id", pa.string()),
-                pa.field("memory_type", pa.string()),
-                pa.field("content", pa.string()),
-                pa.field("metadata", pa.string()),  # JSON-encoded dict
-                pa.field("created_at", pa.string()),
-                pa.field("updated_at", pa.string()),
-                pa.field("replaces_id", pa.utf8(), nullable=True),
-                pa.field("is_active", pa.bool_()),
-                pa.field("vector", pa.list_(pa.float32(), self.embedding_dim)),
-            ]
-        )
+            if self.table_name in self.db.list_tables():
+                table = self.db.open_table(self.table_name)
+                existing_dim = self._get_vector_dim(table)
+                if existing_dim is not None and existing_dim != self.embedding_dim:
+                    logger.warning(
+                        "Table %r vector dimension (%d) does not match "
+                        "embedding_dim (%d); dropping and recreating.",
+                        self.table_name,
+                        existing_dim,
+                        self.embedding_dim,
+                    )
+                    self.db.drop_table(self.table_name)
+                else:
+                    self._ensure_fts_index(table)
+                    self._ensure_rte(table)
+                    _TABLE_CACHE[key] = table
+                    return table
 
-        table = self.db.create_table(self.table_name, schema=schema)
-        self._ensure_fts_index(table)
-        self._ensure_rte(table)
-        return table
+            schema = pa.schema(
+                [
+                    pa.field("id", pa.string(), nullable=False),
+                    pa.field("user_id", pa.string()),
+                    pa.field("session_id", pa.string()),
+                    pa.field("conversation_id", pa.string()),
+                    pa.field("memory_type", pa.string()),
+                    pa.field("content", pa.string()),
+                    pa.field("metadata", pa.string()),  # JSON-encoded dict
+                    pa.field("created_at", pa.string()),
+                    pa.field("updated_at", pa.string()),
+                    pa.field("replaces_id", pa.utf8(), nullable=True),
+                    pa.field("is_active", pa.bool_()),
+                    pa.field("vector", pa.list_(pa.float32(), self.embedding_dim)),
+                ]
+            )
+
+            table = self.db.create_table(self.table_name, schema=schema)
+            self._ensure_fts_index(table)
+            self._ensure_rte(table)
+            _TABLE_CACHE[key] = table
+            return table
 
     @staticmethod
     def _has_index(table, column: str) -> bool:
@@ -555,11 +573,89 @@ class LanceDSPyMemoryStore:
         )
         table.enable_rte(spec)
 
+    @staticmethod
+    def _importance_from_metadata(metadata: Any) -> float:
+        """Resolve a numeric importance in ``[0, 1]`` from stored metadata."""
+        if isinstance(metadata, str):
+            try:
+                metadata = json.loads(metadata)
+            except json.JSONDecodeError:
+                metadata = {}
+        if not isinstance(metadata, dict):
+            metadata = {}
+        raw = metadata.get("_importance", metadata.get("importance"))
+        if raw is None:
+            return 0.5
+        if isinstance(raw, (int, float)):
+            return max(0.0, min(float(raw), 1.0))
+        return {
+            "critical": 1.0,
+            "high": 0.85,
+            "medium": 0.6,
+            "normal": 0.5,
+            "low": 0.3,
+            "trivial": 0.1,
+        }.get(str(raw).strip().lower(), 0.5)
+
+    @staticmethod
+    def _carry_legacy_fields(
+        new_row: dict[str, Any],
+        old_row: dict[str, Any],
+        *,
+        keep_search_text: bool,
+    ) -> None:
+        """Keep access stats (and optionally enriched search text) on a new version."""
+        if keep_search_text and old_row.get("search_text") is not None:
+            new_row["search_text"] = old_row["search_text"]
+        for name in ("last_accessed_at", "access_count"):
+            if old_row.get(name) is not None:
+                new_row[name] = old_row[name]
+
+    @staticmethod
+    def _type_default(field_type: pa.DataType) -> Any:
+        if pa.types.is_string(field_type) or pa.types.is_large_string(field_type):
+            return ""
+        if pa.types.is_boolean(field_type):
+            return False
+        if pa.types.is_integer(field_type):
+            return 0
+        if pa.types.is_floating(field_type):
+            return 0.0
+        if pa.types.is_fixed_size_list(field_type):
+            return [0.0] * field_type.list_size
+        if pa.types.is_list(field_type):
+            return []
+        return None
+
+    @classmethod
+    def _default_for_field(cls, field: pa.Field, row: dict[str, Any]) -> Any:
+        """Fill columns present in older table schemas but not in *row*."""
+        if field.name == "search_text":
+            return row.get("content")
+        if field.name in {"last_accessed_at", "access_count"}:
+            return None
+        if field.name == "importance":
+            return cls._importance_from_metadata(row.get("metadata"))
+        if field.nullable:
+            return None
+        return cls._type_default(field.type)
+
+    def _row_for_write(self, row: dict[str, Any]) -> dict[str, Any]:
+        """Project *row* onto the live table schema, filling legacy columns."""
+        return {
+            field.name: (
+                row[field.name]
+                if field.name in row
+                else self._default_for_field(field, row)
+            )
+            for field in self.table.schema
+        }
+
     def _merge_rows(self, rows: list[dict[str, Any]]) -> None:
         """Upsert full rows through the RTE write path."""
         if not rows:
             return
-        cleaned = [{name: row.get(name) for name in _WRITE_COLUMNS} for row in rows]
+        cleaned = [self._row_for_write(row) for row in rows]
         self.table.merge_insert(
             "id"
         ).when_matched_update_all().when_not_matched_insert_all().execute(cleaned)
@@ -625,6 +721,11 @@ class LanceDSPyMemoryStore:
         }
 
     @staticmethod
+    def _distance_to_similarity(distance: float) -> float:
+        """Map LanceDB's L2 distance to a bounded ``0..1`` relevance score."""
+        return 1.0 / (1.0 + max(float(distance), 0.0))
+
+    @staticmethod
     def _to_memory(row: dict[str, Any]) -> Memory:
         """Convert a raw LanceDB row dict to a ``Memory`` instance."""
         clean = dict(row)
@@ -637,7 +738,7 @@ class LanceDSPyMemoryStore:
             relevance_score = float(clean.pop("_relevance_score"))
         elif "_distance" in clean:
             distance = float(clean.pop("_distance"))
-            relevance_score = 1.0 - distance
+            relevance_score = LanceDSPyMemoryStore._distance_to_similarity(distance)
 
         metadata, scope = LanceDSPyMemoryStore._split_metadata_scope(
             clean.get("metadata")
@@ -806,6 +907,7 @@ class LanceDSPyMemoryStore:
             scope=old.scope,
         )
         new_row["replaces_id"] = old.id
+        self._carry_legacy_fields(new_row, old_row, keep_search_text=True)
         old_row["is_active"] = False
         self._merge_rows([new_row, old_row])
         return self._to_memory(new_row)
@@ -833,6 +935,7 @@ class LanceDSPyMemoryStore:
             scope=next_scope,
         )
         new_row["replaces_id"] = old.id
+        self._carry_legacy_fields(new_row, old_row, keep_search_text=True)
         old_row["is_active"] = False
         self._merge_rows([new_row, old_row])
         return self._to_memory(new_row)
@@ -952,6 +1055,10 @@ class LanceDSPyMemoryStore:
         self._merge_rows([row])
         return self._to_memory(row)
 
+    def _select_all(self, builder, *extra_columns: str):
+        """Project every table column plus the requested score column."""
+        return builder.select([*self.table.schema.names, *extra_columns])
+
     def _hybrid_results(
         self,
         *,
@@ -965,7 +1072,10 @@ class LanceDSPyMemoryStore:
         where = " AND ".join(filters)
         vector_builder = cast(
             LanceVectorQueryBuilder,
-            self.table.search(self._embed(query), vector_column_name="vector"),
+            self._select_all(
+                self.table.search(self._embed(query), vector_column_name="vector"),
+                "_distance",
+            ),
         )
         if refine_factor is not None:
             vector_builder = vector_builder.refine_factor(refine_factor)
@@ -975,7 +1085,10 @@ class LanceDSPyMemoryStore:
         ]
         fts_rows = [
             dict(row)
-            for row in self.table.search(query, query_type="fts", fts_columns="content")
+            for row in self._select_all(
+                self.table.search(query, query_type="fts", fts_columns="content"),
+                "_score",
+            )
             .where(where)
             .limit(fetch_limit)
             .to_list()
@@ -1029,7 +1142,9 @@ class LanceDSPyMemoryStore:
             if "_relevance_score" in r:
                 score = float(r["_relevance_score"])
             elif "_distance" in r:
-                score = 1.0 - float(r["_distance"])
+                score = LanceDSPyMemoryStore._distance_to_similarity(
+                    float(r["_distance"])
+                )
             else:
                 score = 0.0
             if score >= min_score:
@@ -1084,7 +1199,10 @@ class LanceDSPyMemoryStore:
         else:
             builder = cast(
                 LanceVectorQueryBuilder,
-                self.table.search(self._embed(query), vector_column_name="vector"),
+                self._select_all(
+                    self.table.search(self._embed(query), vector_column_name="vector"),
+                    "_distance",
+                ),
             )
             if refine_factor is not None:
                 builder = builder.refine_factor(refine_factor)
@@ -1122,6 +1240,7 @@ class LanceDSPyMemoryStore:
             scope=scope,
         )
         new_row["replaces_id"] = memory_id
+        self._carry_legacy_fields(new_row, old_record, keep_search_text=False)
         old_record["is_active"] = False
 
         self._merge_rows([new_row, old_record])
@@ -1159,7 +1278,10 @@ class LanceDSPyMemoryStore:
         candidate_limit = self._UPSERT_CANDIDATE_LIMIT
         fetch_limit = candidate_limit * (10 if scope else 1)
         candidates = (
-            self.table.search(self._embed(content), vector_column_name="vector")
+            self._select_all(
+                self.table.search(self._embed(content), vector_column_name="vector"),
+                "_distance",
+            )
             .where(" AND ".join(filters))
             .limit(fetch_limit)
             .to_list()
@@ -1170,7 +1292,7 @@ class LanceDSPyMemoryStore:
 
         if candidates:
             nearest_distance = float(candidates[0].get("_distance", 1.0))
-            nearest_similarity = 1.0 - nearest_distance
+            nearest_similarity = self._distance_to_similarity(nearest_distance)
             if nearest_similarity >= skip_threshold:
                 decision = ReconciledMemory(
                     action="keep",
@@ -1427,7 +1549,10 @@ class LanceDSPyMemoryStore:
         )
         fetch_limit = candidate_limit * (10 if scope else 1)
         results = (
-            self.table.search(self._embed(content), vector_column_name="vector")
+            self._select_all(
+                self.table.search(self._embed(content), vector_column_name="vector"),
+                "_distance",
+            )
             .where(" AND ".join(filters))
             .limit(fetch_limit)
             .to_list()
@@ -1440,7 +1565,7 @@ class LanceDSPyMemoryStore:
             if resolved_type == MemoryType.SEMANTIC.value:
                 if use_reconciler:
                     nearest_distance = float(results[0].get("_distance", 1.0))
-                    nearest_similarity = 1.0 - nearest_distance
+                    nearest_similarity = self._distance_to_similarity(nearest_distance)
                     if nearest_similarity >= skip_threshold:
                         return self._without_vectors([dict(results[0])])[0]
 
@@ -1510,7 +1635,7 @@ class LanceDSPyMemoryStore:
 
                 existing = dict(results[0])
                 distance = float(existing.get("_distance", 1.0))
-                cosine_sim = 1.0 - distance
+                cosine_sim = self._distance_to_similarity(distance)
 
                 if cosine_sim >= skip_threshold:
                     return self._without_vectors([existing])[0]
@@ -1566,7 +1691,10 @@ class LanceDSPyMemoryStore:
 
         fetch_limit = limit * (10 if (scope or metadata_filter) else 1)
         candidates = (
-            self.table.search(self._embed(query), vector_column_name="vector")
+            self._select_all(
+                self.table.search(self._embed(query), vector_column_name="vector"),
+                "_distance",
+            )
             .where(" AND ".join(filters))
             .limit(fetch_limit)
             .to_list()

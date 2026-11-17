@@ -1,3 +1,10 @@
+import os
+
+# LanceDB's LSM scanner emits a per-query deprecation warning that the Python
+# API cannot disable per query.  Silence that target unless the app configured
+# LanceDB logging explicitly.  This must run before ``lancedb`` is imported.
+os.environ.setdefault("LANCEDB_LOG", "lance::dataset::scanner=error,lancedb=warn")
+
 from . import memory
 from .extraction import (
     ExtractMemory,
