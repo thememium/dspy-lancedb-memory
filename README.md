@@ -386,7 +386,7 @@ store.delete_memory(memory_id="some-uuid")
 ``upsert_memory`` uses semantic similarity to decide what to do:
 
 1. **Exact match** — same ``content`` string exists → skip (no-op)
-2. **Semantic match** — similar content found (cosine similarity ≥ threshold) → **update** it
+2. **Semantic match** — similar content found (similarity score ≥ threshold) → **update** it
 3. **No match** — nothing close enough → **insert** a new memory
 
 ```python
@@ -591,8 +591,14 @@ table first enables RTE and cannot be changed afterwards.
 
 LanceDB tables created by older versions are migrated automatically: the
 legacy seed row is removed, `id` becomes non-nullable, indexes are added, and
-RTE is enabled. Embedded RTE works against local directories and object
-stores such as S3; no LanceDB Enterprise service is required.
+RTE is enabled. Legacy columns such as `search_text`, `importance`, and access
+stats are populated when writing to older tables. Embedded RTE works against
+local directories and object stores such as S3; no LanceDB Enterprise service
+is required.
+
+All ``Store`` instances in a process share one table handle per dataset, so
+their RTE writers cannot fence each other. Search relevance is reported as
+``1 / (1 + L2 distance)``, bounded to ``0..1``.
 
 <p align="right">(<a href="#readme-top">back to top</a>)</p>
 
