@@ -4,6 +4,7 @@ from __future__ import annotations
 
 from unittest.mock import MagicMock, patch
 
+import httpx
 import pyarrow as pa
 import pytest
 
@@ -105,33 +106,133 @@ class TestAttachFallbackScores:
 
 
 class TestRerank:
-    def test_rerank_with_litellm_and_api_base_and_key(self, sample_table):
+    def test_rerank_with_api_base_and_key(self, sample_table):
         reranker = LiteLLMReranker(
-            model="cohere/rerank-english-v3.0",
+            model="my-provider/rerank-model",
             column="content",
             api_base="http://custom.api",
             api_key="test-key",
         )
 
-        mock_response = {
+        mock_response = MagicMock()
+        mock_response.json.return_value = {
             "results": [
                 {"index": 0, "relevance_score": 0.95},
                 {"index": 1, "relevance_score": 0.85},
                 {"index": 2, "relevance_score": 0.75},
             ]
         }
+        mock_response.raise_for_status = MagicMock()
 
         with patch(
-            "dspy_lancedb_memory.reranking.rerank", return_value=mock_response
-        ) as mock_rerank:
+            "dspy_lancedb_memory.reranking.httpx.post", return_value=mock_response
+        ) as mock_post:
             result = reranker._rerank(sample_table, "test query")
 
-        # Should pass api_base and api_key to litellm.rerank
-        mock_rerank.assert_called_once()
-        call_kwargs = mock_rerank.call_args[1]
-        assert call_kwargs["api_base"] == "http://custom.api"
-        assert call_kwargs["api_key"] == "test-key"
+        mock_post.assert_called_once()
+        assert mock_post.call_args[0][0] == "http://custom.api/rerank"
+        assert mock_post.call_args[1]["headers"]["Authorization"] == "Bearer test-key"
+        assert mock_post.call_args[1]["json"]["model"] == "rerank-model"
         assert "_relevance_score" in result.column_names
+
+    def test_rerank_uses_builtin_provider_endpoint(self, sample_table):
+        reranker = LiteLLMReranker(
+            model="voyage/rerank-2.5",
+            column="content",
+        )
+
+        mock_response = MagicMock()
+        # Voyage returns a ``data`` list instead of Cohere's ``results``.
+        mock_response.json.return_value = {
+            "data": [
+                {"index": 2, "relevance_score": 0.99},
+                {"index": 0, "relevance_score": 0.42},
+            ]
+        }
+        mock_response.raise_for_status = MagicMock()
+
+        with (
+            patch(
+                "dspy_lancedb_memory.reranking.os.environ.get",
+                side_effect=lambda key, default=None: (
+                    "voyage-key" if key == "VOYAGE_API_KEY" else default
+                ),
+            ),
+            patch(
+                "dspy_lancedb_memory.reranking.httpx.post", return_value=mock_response
+            ) as mock_post,
+        ):
+            result = reranker._rerank(sample_table, "test query")
+
+        assert mock_post.call_args[0][0] == "https://api.voyageai.com/v1/rerank"
+        assert mock_post.call_args[1]["headers"]["Authorization"] == "Bearer voyage-key"
+        assert mock_post.call_args[1]["json"]["model"] == "rerank-2.5"
+        assert result["id"].to_pylist() == ["id3", "id1"]
+        assert result["_relevance_score"].to_pylist() == pytest.approx([0.99, 0.42])
+
+    def test_rerank_unknown_provider_without_api_base_falls_back(self, sample_table):
+        reranker = LiteLLMReranker(model="unknown/rerank-model", column="content")
+
+        result = reranker._rerank(sample_table, "test query")
+
+        assert "_relevance_score" in result.column_names
+        assert result["id"].to_pylist() == ["id1", "id2", "id3"]
+
+    def test_rerank_infers_openrouter_from_model_name(self, sample_table):
+        reranker = LiteLLMReranker(model="cohere/rerank-4-fast", column="content")
+
+        mock_response = MagicMock()
+        mock_response.json.return_value = {
+            "results": [
+                {"index": 1, "relevance_score": 0.9},
+                {"index": 0, "relevance_score": 0.1},
+            ]
+        }
+        mock_response.raise_for_status = MagicMock()
+
+        with (
+            patch(
+                "dspy_lancedb_memory.reranking.os.environ.get",
+                side_effect=lambda key, default=None: (
+                    "or-key" if key == "OPENROUTER_API_KEY" else default
+                ),
+            ),
+            patch(
+                "dspy_lancedb_memory.reranking.httpx.post", return_value=mock_response
+            ) as mock_post,
+        ):
+            result = reranker._rerank(sample_table, "test query")
+
+        assert mock_post.call_args[0][0] == "https://openrouter.ai/api/v1/rerank"
+        assert mock_post.call_args[1]["headers"]["Authorization"] == "Bearer or-key"
+        assert mock_post.call_args[1]["json"]["model"] == "cohere/rerank-4-fast"
+        assert result["id"].to_pylist() == ["id2", "id1"]
+
+    def test_rerank_direct_cohere_uses_v_prefixed_model(self, sample_table):
+        reranker = LiteLLMReranker(model="cohere/rerank-v4.0-fast", column="content")
+
+        mock_response = MagicMock()
+        mock_response.json.return_value = {
+            "results": [{"index": 0, "relevance_score": 0.8}]
+        }
+        mock_response.raise_for_status = MagicMock()
+
+        with (
+            patch(
+                "dspy_lancedb_memory.reranking.os.environ.get",
+                side_effect=lambda key, default=None: (
+                    "co-key" if key == "COHERE_API_KEY" else default
+                ),
+            ),
+            patch(
+                "dspy_lancedb_memory.reranking.httpx.post", return_value=mock_response
+            ) as mock_post,
+        ):
+            reranker._rerank(sample_table, "test query")
+
+        assert mock_post.call_args[0][0] == "https://api.cohere.com/v2/rerank"
+        assert mock_post.call_args[1]["headers"]["Authorization"] == "Bearer co-key"
+        assert mock_post.call_args[1]["json"]["model"] == "rerank-v4.0-fast"
 
     def test_rerank_with_openrouter_model(self, sample_table):
         reranker = LiteLLMReranker(
@@ -175,8 +276,8 @@ class TestRerank:
         reranker = LiteLLMReranker(model="cohere/rerank-english-v3.0", column="content")
 
         with patch(
-            "dspy_lancedb_memory.reranking.rerank",
-            side_effect=Exception("API Error"),
+            "dspy_lancedb_memory.reranking.httpx.post",
+            side_effect=httpx.HTTPError("API Error"),
         ):
             result = reranker._rerank(sample_table, "test query")
 
@@ -191,6 +292,38 @@ class TestRerank:
 
         result = reranker._rerank(empty_table, "test query")
         assert len(result) == 0
+
+
+# ---------------------------------------------------------------------------
+# _parse_response
+# ---------------------------------------------------------------------------
+
+
+class TestParseResponse:
+    def test_skips_rows_without_a_score(self):
+        indices, scores = LiteLLMReranker._parse_response(
+            {
+                "results": [
+                    {"index": 0},
+                    {"index": 1, "score": 0.5},
+                ]
+            }
+        )
+
+        assert indices == [1]
+        assert scores == [0.5]
+
+    def test_raises_when_no_results_are_scored(self):
+        with pytest.raises(ValueError, match="no scored results"):
+            LiteLLMReranker._parse_response({"results": [{"index": 0}]})
+
+    def test_parses_data_list(self):
+        indices, scores = LiteLLMReranker._parse_response(
+            {"data": [{"index": 2, "relevance_score": 0.9}]}
+        )
+
+        assert indices == [2]
+        assert scores == [0.9]
 
 
 # ---------------------------------------------------------------------------
@@ -211,13 +344,15 @@ class TestRerankOpenrouter:
         }
         mock_response.raise_for_status = MagicMock()
 
-        with patch(
-            "dspy_lancedb_memory.reranking.os.environ.get", return_value="test-key"
-        ):
-            with patch(
+        with (
+            patch(
+                "dspy_lancedb_memory.reranking.os.environ.get", return_value="test-key"
+            ),
+            patch(
                 "dspy_lancedb_memory.reranking.httpx.post", return_value=mock_response
-            ) as mock_post:
-                result = reranker._rerank_openrouter("test query", ["doc1", "doc2"])
+            ) as mock_post,
+        ):
+            result = reranker._rerank_openrouter("test query", ["doc1", "doc2"])
 
         assert result["results"][0]["relevance_score"] == 0.9
         mock_post.assert_called_once()
@@ -231,13 +366,15 @@ class TestRerankOpenrouter:
         mock_response.json.return_value = {"results": []}
         mock_response.raise_for_status = MagicMock()
 
-        with patch(
-            "dspy_lancedb_memory.reranking.os.environ.get", return_value="test-key"
-        ):
-            with patch(
+        with (
+            patch(
+                "dspy_lancedb_memory.reranking.os.environ.get", return_value="test-key"
+            ),
+            patch(
                 "dspy_lancedb_memory.reranking.httpx.post", return_value=mock_response
-            ) as mock_post:
-                reranker._rerank_openrouter("query", ["doc1"])
+            ) as mock_post,
+        ):
+            reranker._rerank_openrouter("query", ["doc1"])
 
         call_args = mock_post.call_args
         payload = call_args[1]["json"]
@@ -246,9 +383,11 @@ class TestRerankOpenrouter:
     def test_rerank_openrouter_raises_without_api_key(self):
         reranker = LiteLLMReranker(model="openrouter/cohere/rerank-4-fast")
 
-        with patch("dspy_lancedb_memory.reranking.os.environ.get", return_value=None):
-            with pytest.raises(ValueError, match="OPENROUTER_API_KEY"):
-                reranker._rerank_openrouter("query", ["doc1"])
+        with (
+            patch("dspy_lancedb_memory.reranking.os.environ.get", return_value=None),
+            pytest.raises(ValueError, match="OPENROUTER_API_KEY"),
+        ):
+            reranker._rerank_openrouter("query", ["doc1"])
 
 
 # ---------------------------------------------------------------------------
@@ -396,46 +535,81 @@ class TestRerankInterface:
     def test_rerank_hybrid_with_relevance_score(self, sample_table, sample_fts_table):
         reranker = LiteLLMReranker(return_score="relevance", column="content")
 
-        # Mock both the merge and rerank methods
-        with patch.object(reranker, "merge_results") as mock_merge:
-            with patch.object(reranker, "_rerank") as mock_rerank:
-                merged = pa.table(
-                    {
-                        "content": [
-                            "test content 1",
-                            "test content 2",
-                            "test content 3",
-                        ],
-                        "id": ["id1", "id2", "id3"],
-                        "_distance": [0.1, 0.2, 0.3],
-                    }
-                )
-                mock_merge.return_value = merged
+        # Mock the merge, rerank, and score-selection methods
+        with (
+            patch.object(reranker, "merge_results") as mock_merge,
+            patch.object(reranker, "_rerank") as mock_rerank,
+            patch.object(reranker, "_keep_relevance_score") as mock_keep,
+        ):
+            merged = pa.table(
+                {
+                    "content": [
+                        "test content 1",
+                        "test content 2",
+                        "test content 3",
+                    ],
+                    "id": ["id1", "id2", "id3"],
+                    "_distance": [0.1, 0.2, 0.3],
+                }
+            )
+            mock_merge.return_value = merged
 
-                reranked = merged.append_column(
-                    "_relevance_score",
-                    pa.array([0.95, 0.85, 0.75], type=pa.float32()),
-                )
-                mock_rerank.return_value = reranked
+            reranked = merged.append_column(
+                "_relevance_score",
+                pa.array([0.95, 0.85, 0.75], type=pa.float32()),
+            )
+            mock_rerank.return_value = reranked
 
-                with patch.object(reranker, "_keep_relevance_score") as mock_keep:
-                    final_table = pa.table(
-                        {
-                            "content": [
-                                "test content 1",
-                                "test content 2",
-                                "test content 3",
-                            ],
-                            "id": ["id1", "id2", "id3"],
-                            "_relevance_score": [0.95, 0.85, 0.75],
-                        }
-                    )
-                    mock_keep.return_value = final_table
-                    _result = reranker.rerank_hybrid(
-                        "query", sample_table, sample_fts_table
-                    )
+            final_table = pa.table(
+                {
+                    "content": [
+                        "test content 1",
+                        "test content 2",
+                        "test content 3",
+                    ],
+                    "id": ["id1", "id2", "id3"],
+                    "_relevance_score": [0.95, 0.85, 0.75],
+                }
+            )
+            mock_keep.return_value = final_table
+            _result = reranker.rerank_hybrid("query", sample_table, sample_fts_table)
 
         # When score="relevance", merge_results should be called (not _merge_and_keep_scores)
         mock_merge.assert_called_once()
         # _keep_relevance_score should be called
         mock_keep.assert_called_once()
+
+    def test_rerank_hybrid_with_score_all_merges_and_keeps_scores(
+        self, sample_table, sample_fts_table
+    ):
+        reranker = LiteLLMReranker(return_score="all", column="content")
+
+        with (
+            patch.object(reranker, "_merge_and_keep_scores") as mock_merge_all,
+            patch.object(reranker, "_rerank") as mock_rerank,
+            patch.object(reranker, "_keep_relevance_score") as mock_keep,
+        ):
+            merged = pa.table(
+                {
+                    "content": [
+                        "test content 1",
+                        "test content 2",
+                        "test content 3",
+                    ],
+                    "id": ["id1", "id2", "id3"],
+                    "_distance": [0.1, 0.2, 0.3],
+                }
+            )
+            mock_merge_all.return_value = merged
+
+            reranked = merged.append_column(
+                "_relevance_score",
+                pa.array([0.95, 0.85, 0.75], type=pa.float32()),
+            )
+            mock_rerank.return_value = reranked
+
+            result = reranker.rerank_hybrid("query", sample_table, sample_fts_table)
+
+        mock_merge_all.assert_called_once()
+        mock_keep.assert_not_called()
+        assert "_relevance_score" in result.column_names

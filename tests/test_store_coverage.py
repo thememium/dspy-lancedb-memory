@@ -6,6 +6,7 @@ import json
 from types import SimpleNamespace
 
 import dspy
+import pyarrow as pa
 import pytest
 
 from dspy_lancedb_memory.models import MemoryType, ReconciledMemory, Scope
@@ -65,6 +66,25 @@ def _rows(store: LanceDSPyMemoryStore) -> list[dict]:
 
 def _active_rows(store: LanceDSPyMemoryStore) -> list[dict]:
     return store.table.search().where("id != '__seed__' AND is_active = true").to_list()
+
+
+# ---------------------------------------------------------------------------
+# _get_vector_dim edge cases
+# ---------------------------------------------------------------------------
+
+
+class TestGetVectorDim:
+    def test_variable_size_list_returns_none(self):
+        table = pa.table(
+            {"vector": pa.array([[0.1, 0.2]], type=pa.list_(pa.float32()))}
+        )
+
+        assert LanceDSPyMemoryStore._get_vector_dim(table) is None
+
+    def test_table_without_vector_column_returns_none(self):
+        table = pa.table({"id": [1]})
+
+        assert LanceDSPyMemoryStore._get_vector_dim(table) is None
 
 
 # ---------------------------------------------------------------------------
@@ -731,7 +751,7 @@ def test_process_memories_delete_with_search_query(store, monkeypatch):
         ),
     )
 
-    created, deleted = store.process_memories(
+    _created, deleted = store.process_memories(
         user_id="user-1",
         contents=[{"role": "user", "content": "Delete pizza"}],
         extract=True,
@@ -962,7 +982,7 @@ def test_get_or_create_table_with_dimension_mismatch(tmp_path):
         reranker=None,
     )
     # Override _embed to use our test embeddings
-    store2._embed = lambda text: different_embeddings.get(text, [0.5, 0.5])  # ty:ignore[invalid-assignment]
+    store2._embed = lambda text: different_embeddings.get(text, [0.5, 0.5])
     store2.table = store2._get_or_create_table()
 
     # Table should have been recreated with new dimension
@@ -1033,7 +1053,7 @@ def test_bound_store_process_memories(store):
         scope={"tenant": "tenant-a"},
     )
 
-    created, deleted = bound.process_memories(
+    created, _deleted = bound.process_memories(
         contents=[{"role": "user", "content": "I love pizza"}],
         extract=False,
     )
@@ -1259,7 +1279,7 @@ def test_process_memories_update_action(store, monkeypatch):
         ),
     )
 
-    created, deleted = store.process_memories(
+    created, _deleted = store.process_memories(
         user_id="user-1",
         contents=[{"role": "user", "content": "My full name is Edward Boswell"}],
         extract=True,

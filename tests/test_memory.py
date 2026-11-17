@@ -188,7 +188,7 @@ class TestMemoryStore:
         )
         assert store.rerank_limit_multiplier == 1
 
-    def test_store_with_reranker_lm_string_creates_litellm_reranker(self, tmp_path):
+    def test_store_with_reranker_lm_string_creates_default_reranker(self, tmp_path):
         """Test Store() with reranker_lm string creates LiteLLMReranker."""
         config._lm = SimpleNamespace(model="test-model")  # ty:ignore[invalid-assignment]
 

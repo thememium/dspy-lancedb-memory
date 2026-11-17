@@ -32,10 +32,12 @@ def assert_python_import() -> None:
         [
             sys.executable,
             "-c",
-            "import dspy_lancedb_memory, importlib.metadata as m; "
-            "print(m.version('dspy-lancedb-memory')); "
-            "\ntry:\n print(m.version('dspy-lancedb-memory'))\n"
-            "except m.PackageNotFoundError:\n print('missing')",
+            (
+                "import dspy_lancedb_memory, importlib.metadata as m; "
+                "print(m.version('dspy-lancedb-memory')); "
+                "\ntry:\n print(m.version('dspy-lancedb-memory'))\n"
+                "except m.PackageNotFoundError:\n print('missing')"
+            ),
         ]
     )
     output = coerce_output(result.stdout) + coerce_output(result.stderr)

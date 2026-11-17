@@ -52,6 +52,10 @@ class TestMemoryTypeMissing:
         with pytest.raises(ValueError):
             MemoryType("nonexistent_type")
 
+    def test_memory_type_missing_returns_member_for_known_value(self):
+        """Test _missing_ resolves a member by value string."""
+        assert MemoryType._missing_("semantic") is MemoryType.SEMANTIC
+
     def test_memory_type_missing_returns_none_for_unknown(self):
         """Test _missing_ returns None for unknown values (line 36)."""
         # Call _missing_ directly to cover line 36
@@ -99,7 +103,7 @@ class TestScope:
 
     def test_scope_with_extra_fields(self):
         scope = Scope(custom_field="value")
-        assert getattr(scope, "custom_field") == "value"
+        assert getattr(scope, "custom_field") == "value"  # noqa: B009
         assert scope.to_dict() == {"custom_field": "value"}
 
 

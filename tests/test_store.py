@@ -1156,7 +1156,7 @@ def test_append_only_process_memories_delete_is_soft(
         "dspy_lancedb_memory.store.MemoryOperationExtractor", StubDeleteExtractor
     )
 
-    created, deleted = store.process_memories(
+    _created, deleted = store.process_memories(
         user_id="user-1",
         contents=[{"role": "user", "content": "I no longer enjoy hiking"}],
         extract=True,
