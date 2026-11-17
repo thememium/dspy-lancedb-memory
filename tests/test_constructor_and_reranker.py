@@ -497,6 +497,37 @@ class TestSearchWithReranker:
         )
         assert isinstance(results, list)
 
+    def test_hybrid_reranker_strips_row_id(self, tmp_path):
+        """Rows returned by the reranker must not leak the internal _rowid."""
+        mock_reranker = MagicMock()
+        mock_reranker.score = "relevance"
+        mock_reranker.rerank_hybrid.return_value.to_pylist.return_value = [
+            {"id": "x", "_rowid": "x", "content": "favorite food is pizza"}
+        ]
+
+        store = StubMemoryStoreWithReranker(
+            uri=str(tmp_path),
+            table_name="memories",
+            embeddings=EMBEDDINGS,
+            reranker=mock_reranker,
+        )
+        store.create_memory(
+            user_id="user-1",
+            content="favorite food is pizza",
+            memory_type="semantic",
+        )
+
+        rows = store._hybrid_results(
+            query="what food do I like",
+            filters=["user_id = 'user-1'"],
+            fetch_limit=5,
+            refine_factor=None,
+            use_reranker=True,
+        )
+
+        assert rows
+        assert "_rowid" not in rows[0]
+
     def test_search_hybrid_with_reranker(self, tmp_path):
         """Test hybrid search with reranker (line 926)."""
         from unittest.mock import MagicMock
@@ -518,25 +549,16 @@ class TestSearchWithReranker:
             memory_type="semantic",
         )
 
-        # Mock the table.search to return a builder that supports rerank
-        mock_builder = MagicMock()
-        mock_builder.vector.return_value = mock_builder
-        mock_builder.text.return_value = mock_builder
-        mock_builder.rerank.return_value = mock_builder
-        mock_builder.where.return_value = mock_builder
-        mock_builder.limit.return_value = mock_builder
-        mock_builder.to_list.return_value = []
+        mock_reranker.rerank_hybrid.return_value.to_pylist.return_value = []
 
-        with patch.object(store.table, "search", return_value=mock_builder):
-            results = store.search_memories(
-                user_id="user-1",
-                query="what food do I like",
-                query_type="hybrid",
-                use_reranker=True,
-            )
-
-        # Verify rerank was called (line 926)
-        mock_builder.rerank.assert_called_once_with(
-            mock_reranker, query_string="what food do I like"
+        results = store.search_memories(
+            user_id="user-1",
+            query="what food do I like",
+            query_type="hybrid",
+            use_reranker=True,
         )
+
+        # Hybrid search merges local vector/FTS results through the reranker.
+        mock_reranker.rerank_hybrid.assert_called_once()
+        assert mock_reranker.rerank_hybrid.call_args[0][0] == "what food do I like"
         assert isinstance(results, list)

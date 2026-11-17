@@ -613,3 +613,32 @@ class TestRerankInterface:
         mock_merge_all.assert_called_once()
         mock_keep.assert_not_called()
         assert "_relevance_score" in result.column_names
+
+
+# ---------------------------------------------------------------------------
+# rerank_vector and rerank_fts delegation
+# ---------------------------------------------------------------------------
+
+
+class TestRerankVectorFtsDelegation:
+    def test_rerank_vector_delegates_to_rerank(self, sample_table):
+        reranker = LiteLLMReranker(model="cohere/rerank-english-v3.0")
+
+        with patch.object(
+            reranker, "_rerank", return_value=sample_table
+        ) as mock_rerank:
+            result = reranker.rerank_vector("query", sample_table)
+
+        mock_rerank.assert_called_once_with(sample_table, "query")
+        assert "_distance" not in result.column_names
+
+    def test_rerank_fts_delegates_to_rerank(self, sample_fts_table):
+        reranker = LiteLLMReranker(model="cohere/rerank-english-v3.0")
+
+        with patch.object(
+            reranker, "_rerank", return_value=sample_fts_table
+        ) as mock_rerank:
+            result = reranker.rerank_fts("query", sample_fts_table)
+
+        mock_rerank.assert_called_once_with(sample_fts_table, "query")
+        assert "_score" not in result.column_names

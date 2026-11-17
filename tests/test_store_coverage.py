@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import json
 from types import SimpleNamespace
+from unittest.mock import patch
 
 import dspy
 import pyarrow as pa
@@ -1385,27 +1386,70 @@ def test_ensure_fts_index_handles_exception(store):
     """Test _ensure_fts_index handles exceptions gracefully (lines 490-491)."""
     from unittest.mock import MagicMock
 
-    # Create a mock table that raises an exception on create_fts_index
+    from lancedb.index import FTS
+
+    # Create a mock table with no indexes that raises on create_index
     mock_table = MagicMock()
-    mock_table.create_fts_index.side_effect = Exception("FTS index error")
+    mock_table.list_indices.return_value = []
+    mock_table.create_index.side_effect = Exception("FTS index error")
 
     # Call _ensure_fts_index - should not raise, just log
     store._ensure_fts_index(mock_table)
 
-    # Verify create_fts_index was called
-    mock_table.create_fts_index.assert_called_once_with("content", replace=True)
+    # Verify the modern index API was used
+    mock_table.create_index.assert_called_once()
+    assert mock_table.create_index.call_args[0][0] == "content"
+    assert isinstance(mock_table.create_index.call_args[1]["config"], FTS)
 
 
 def test_ensure_fts_index_creates_index(store):
     """Test _ensure_fts_index creates FTS index successfully."""
     from unittest.mock import MagicMock
 
-    # Create a mock table that succeeds on create_fts_index
+    from lancedb.index import FTS
+
+    # Create a mock table with no indexes
     mock_table = MagicMock()
-    mock_table.create_fts_index.return_value = None
+    mock_table.list_indices.return_value = []
+    mock_table.create_index.return_value = None
 
     # Call _ensure_fts_index - should succeed
     store._ensure_fts_index(mock_table)
 
-    # Verify create_fts_index was called
-    mock_table.create_fts_index.assert_called_once_with("content", replace=True)
+    # Verify the modern index API was used
+    mock_table.create_index.assert_called_once()
+    assert mock_table.create_index.call_args[0][0] == "content"
+    assert isinstance(mock_table.create_index.call_args[1]["config"], FTS)
+
+
+def test_ensure_fts_index_skips_existing_index(store):
+    """An existing content index means no rebuild on startup."""
+    from unittest.mock import MagicMock
+
+    mock_table = MagicMock()
+    index = MagicMock()
+    index.columns = ["content"]
+    mock_table.list_indices.return_value = [index]
+
+    store._ensure_fts_index(mock_table)
+
+    mock_table.create_index.assert_not_called()
+
+
+# ---------------------------------------------------------------------------
+# RTE write helpers
+# ---------------------------------------------------------------------------
+
+
+def test_merge_rows_empty_is_noop(store):
+    """An empty write batch must not touch LanceDB."""
+    with patch.object(store.table, "merge_insert") as mock_merge:
+        store._merge_rows([])
+
+    mock_merge.assert_not_called()
+
+
+def test_delete_missing_memory_is_noop(store):
+    """Deleting an unknown id must not raise or write."""
+    store.delete_memory(memory_id="missing-id")
+    assert store.list_memories(user_id="user-1") == []
