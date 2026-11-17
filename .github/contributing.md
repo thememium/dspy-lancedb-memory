@@ -136,10 +136,10 @@ This runs pytest with verbose output. You can also run specific tests:
 
 ```bash
 # Run a specific test file
-$ uv run pytest tests/test_store.py -v
+$ uv run pytest tests/store/test_crud.py -v
 
 # Run a specific test
-$ uv run pytest tests/test_store.py::test_create_memory -v
+$ uv run pytest tests/store/test_crud.py::test_create_memory_defaults -v
 ```
 
 ### `uv run poe test-e2e`
@@ -230,13 +230,13 @@ $ uv run poe release
 ```
 ├── src/dspy_lancedb_memory/    # Source code
 │   ├── __init__.py             # Public API exports
-│   ├── config.py               # Global configuration (memory.configure())
-│   ├── extraction.py           # DSPy ChainOfThought memory extraction
-│   ├── memory.py               # SDK module — configure() and Store()
-│   ├── models.py               # Pydantic models (MemoryItem, MemoryType)
-│   ├── reranking.py            # LiteLLMReranker for cross-encoder reranking
-│   └── store.py                # Core Store class — CRUD, upsert, search
-├── tests/                      # Test files
+│   ├── config/                 # Configuration defaults, state, getters
+│   ├── extraction/             # DSPy signatures and extraction modules
+│   ├── memory/                 # SDK factory — configure() and Store()
+│   ├── models/                 # Pydantic models and dataclasses
+│   ├── reranking/              # LiteLLMReranker and provider registry
+│   └── store/                  # LanceDB store: core, queries, writes, helpers
+├── tests/                      # Tests mirroring the source packages
 ├── docs/                       # Documentation assets (if any)
 └── dist/                       # Build output
 ```
