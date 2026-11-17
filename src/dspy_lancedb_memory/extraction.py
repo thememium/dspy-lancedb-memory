@@ -208,9 +208,12 @@ class MemoryReconciler(dspy.Module):
 
         reconciled.action = action
 
-        if action in ("keep", "update") and not reconciled.memory_id:
-            if existing_memories:
-                reconciled.memory_id = str(existing_memories[0]["id"])
+        if (
+            action in ("keep", "update")
+            and not reconciled.memory_id
+            and existing_memories
+        ):
+            reconciled.memory_id = str(existing_memories[0]["id"])
 
         if not reconciled.final_content:
             if action == "create":
