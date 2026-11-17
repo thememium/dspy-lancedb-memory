@@ -1,5 +1,6 @@
 import json
 import logging
+import os
 import re
 import uuid
 from datetime import UTC, datetime
@@ -96,12 +97,21 @@ class LanceDSPyMemoryStore:
             embedder_kwargs["api_base"] = lm_kwargs["api_base"]
         if lm_kwargs.get("api_key"):
             embedder_kwargs["api_key"] = lm_kwargs["api_key"]
-        # When api_base is set the target is an OpenAI-compatible server,
-        # so force the ``openai/`` provider prefix regardless of the original
-        # model string (e.g. ``huggingface/…``).  ``dspy.Embedder`` only accepts
-        # OpenAI/Azure hosted models and would reject the provider prefix.
+        # ``dspy.Embedder`` only accepts OpenAI/Azure hosted models, so route
+        # OpenRouter and custom endpoints through the OpenAI-compatible client.
         embedder_model = embedding_lm.model
-        if "api_base" in embedder_kwargs and "/" in embedder_model:
+        if embedder_model.startswith("openrouter/"):
+            # ``dspy.Embedder`` drops the first path segment before calling the
+            # API, so prefix the full OpenRouter id (e.g.
+            # ``openai/openai/text-embedding-3-small`` sends
+            # ``openai/text-embedding-3-small``).
+            embedder_model = "openai/" + embedder_model[len("openrouter/") :]
+            embedder_kwargs.setdefault("api_base", "https://openrouter.ai/api/v1")
+            openrouter_key = os.environ.get("OPENROUTER_API_KEY")
+            if openrouter_key:
+                embedder_kwargs.setdefault("api_key", openrouter_key)
+            embedder_kwargs.setdefault("encoding_format", "float")
+        elif "api_base" in embedder_kwargs and "/" in embedder_model:
             embedder_model = "openai/" + embedder_model.split("/", 1)[1]
             embedder_kwargs["encoding_format"] = "float"
         self.embedder = dspy.Embedder(
