@@ -129,6 +129,7 @@ def Store(
     reranker_lm: dspy.LM | str | None = None,
     reranker: Reranker | None | Any = _UNSET,
     rerank_limit_multiplier: int = 10,
+    rte_durable_write: bool = False,
 ) -> LanceDSPyMemoryStore:
     """Create a memory store, picking up defaults from :func:`configure`.
 
@@ -158,6 +159,11 @@ def Store(
         * ``Reranker`` instance — use as-is.
     rerank_limit_multiplier :
         Extra candidates to fetch before reranking trims to ``limit``.
+    rte_durable_write :
+        When ``True``, every write waits for WAL persistence (~100 ms per write
+        on macOS, a few ms on Linux).  Default ``False`` batches WAL flushes
+        (100 ms / 10 MB), so writes are sub-millisecond and a crash can lose
+        only that tail.  Applies when the table first enables RTE.
 
     Returns
     -------
@@ -213,4 +219,5 @@ def Store(
         signature=signature,
         reranker=reranker,
         rerank_limit_multiplier=rerank_limit_multiplier,
+        rte_durable_write=rte_durable_write,
     )

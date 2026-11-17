@@ -1,8 +1,10 @@
+import atexit
 import json
 import logging
 import os
 import re
 import uuid
+import weakref
 from datetime import UTC, datetime
 from difflib import SequenceMatcher
 from typing import Any, cast
@@ -10,6 +12,8 @@ from typing import Any, cast
 import dspy
 import lancedb
 import pyarrow as pa
+from lancedb import RTEWriteSpec
+from lancedb.index import FTS, BTree, IvfPq
 from lancedb.query import LanceVectorQueryBuilder
 from lancedb.rerankers import Reranker
 from pydantic import BaseModel
@@ -36,6 +40,23 @@ logger = logging.getLogger("dspy_lancedb_memory")
 
 _SEMANTIC_DUPLICATE_STOPWORDS = frozenset(
     {"a", "an", "the", "their", "his", "her", "our", "my", "your"}
+)
+
+# Columns accepted by ``merge_insert``; search-only columns (``_distance``,
+# ``_score``, ``_relevance_score``) are dropped before a write.
+_WRITE_COLUMNS = (
+    "id",
+    "user_id",
+    "session_id",
+    "conversation_id",
+    "memory_type",
+    "content",
+    "metadata",
+    "created_at",
+    "updated_at",
+    "replaces_id",
+    "is_active",
+    "vector",
 )
 
 
@@ -82,11 +103,13 @@ class LanceDSPyMemoryStore:
         signature=None,
         reranker: Reranker | None = None,
         rerank_limit_multiplier: int = 10,
+        rte_durable_write: bool = False,
     ):
         self.db = lancedb.connect(uri)
         self.table_name = table_name
         self.embedding_dim = embedding_dim
         self.rerank_limit_multiplier = max(rerank_limit_multiplier, 1)
+        self.rte_durable_write = rte_durable_write
         self._extraction_lm = extraction_lm
 
         if embedding_lm is None:
@@ -126,6 +149,21 @@ class LanceDSPyMemoryStore:
             self.embedding_dim = self._infer_embedding_dim()
 
         self.table = self._get_or_create_table()
+        self._register_flush_on_exit()
+
+    def _register_flush_on_exit(self) -> None:
+        ref = weakref.ref(self)
+
+        def _flush_on_exit() -> None:
+            store = ref()
+            if store is None:
+                return
+            try:
+                store.flush()
+            except Exception:
+                logger.debug("RTE flush on exit failed", exc_info=True)
+
+        atexit.register(_flush_on_exit)
 
     def _embed(self, text: str) -> list[float]:
         # DSPy Embedder accepts a list[str] and returns a 2D embedding array/list.
@@ -136,7 +174,7 @@ class LanceDSPyMemoryStore:
         return [[float(v) for v in row] for row in self.embedder(texts)]
 
     def _infer_embedding_dim(self) -> int:
-        if self.table_name in self.db.table_names():
+        if self.table_name in self.db.list_tables():
             table = self.db.open_table(self.table_name)
             dim = self._get_vector_dim(table)
             if dim is not None:
@@ -437,7 +475,7 @@ class LanceDSPyMemoryStore:
         assert self.embedding_dim is not None, (
             "embedding_dim must be set before creating table"
         )
-        if self.table_name in self.db.table_names():
+        if self.table_name in self.db.list_tables():
             table = self.db.open_table(self.table_name)
             existing_dim = self._get_vector_dim(table)
             if existing_dim is not None and existing_dim != self.embedding_dim:
@@ -451,11 +489,12 @@ class LanceDSPyMemoryStore:
                 self.db.drop_table(self.table_name)
             else:
                 self._ensure_fts_index(table)
+                self._ensure_rte(table)
                 return table
 
         schema = pa.schema(
             [
-                pa.field("id", pa.string()),
+                pa.field("id", pa.string(), nullable=False),
                 pa.field("user_id", pa.string()),
                 pa.field("session_id", pa.string()),
                 pa.field("conversation_id", pa.string()),
@@ -470,38 +509,86 @@ class LanceDSPyMemoryStore:
             ]
         )
 
-        table = self.db.create_table(
-            self.table_name,
-            data=[
-                {
-                    "id": "__seed__",
-                    "user_id": "__seed__",
-                    "session_id": "__seed__",
-                    "conversation_id": "__seed__",
-                    "memory_type": "seed",
-                    "content": "seed",
-                    "metadata": "{}",
-                    "created_at": datetime.now(UTC).isoformat(),
-                    "updated_at": datetime.now(UTC).isoformat(),
-                    "replaces_id": None,
-                    "is_active": True,
-                    "vector": [0.0] * self.embedding_dim,
-                }
-            ],
-            schema=schema,
-        )
+        table = self.db.create_table(self.table_name, schema=schema)
         self._ensure_fts_index(table)
+        self._ensure_rte(table)
         return table
+
+    @staticmethod
+    def _has_index(table, column: str) -> bool:
+        return any(column in (idx.columns or []) for idx in table.list_indices())
 
     @staticmethod
     def _ensure_fts_index(table) -> None:
         """Create a full-text search index on the ``content`` column if absent."""
         try:
-            table.create_fts_index("content", replace=True)
+            if not LanceDSPyMemoryStore._has_index(table, "content"):
+                table.create_index("content", config=FTS())
         except Exception:
             logger.debug(
                 "FTS index already exists or could not be created", exc_info=True
             )
+
+    def _ensure_rte(self, table) -> None:
+        """Enable the embedded real-time engine for millisecond writes.
+
+        RTE needs a non-nullable primary key and a scalar index on it; both are
+        created here for tables made by older versions.  Tables that already
+        have an RTE spec are left untouched.
+        """
+        # RTE refuses vector search unless the vector index is maintained by
+        # the write spec; the default spec maintains every index on the table.
+        if not LanceDSPyMemoryStore._has_index(table, "vector"):
+            table.create_index("vector", config=IvfPq())
+        if table.get_rte_spec() is not None:
+            return
+        if table.schema.field("id").nullable:
+            table.alter_columns({"path": "id", "nullable": False})
+        # Older versions needed a seed row to create an empty table; drop it
+        # while the table is still on the regular write path.
+        table.delete("id = '__seed__'")
+        table.set_unenforced_primary_key("id")
+        if not LanceDSPyMemoryStore._has_index(table, "id"):
+            table.create_index("id", config=BTree())
+        spec = RTEWriteSpec.unsharded().with_writer_config_defaults(
+            {"durable_write": "true" if self.rte_durable_write else "false"}
+        )
+        table.enable_rte(spec)
+
+    def _merge_rows(self, rows: list[dict[str, Any]]) -> None:
+        """Upsert full rows through the RTE write path."""
+        if not rows:
+            return
+        cleaned = [{name: row.get(name) for name in _WRITE_COLUMNS} for row in rows]
+        self.table.merge_insert(
+            "id"
+        ).when_matched_update_all().when_not_matched_insert_all().execute(cleaned)
+
+    def _mark_inactive(self, rows: list[dict[str, Any]]) -> None:
+        """Soft-delete rows, preserving every other column."""
+        patched = [dict(row) for row in rows]
+        for row in patched:
+            row["is_active"] = False
+        self._merge_rows(patched)
+
+    def flush(self) -> None:
+        """Flush buffered RTE writes to durable storage.
+
+        Embedded RTE flushes its write-ahead log when the cached shard writers
+        close.  Registered as an ``atexit`` hook, so normal process exit
+        persists writes; call it explicitly before a planned shutdown.
+        """
+        self.table.close_rte_writers()
+
+    def _get_raw_memory(self, memory_id: str) -> dict[str, Any] | None:
+        """Fetch one row including its vector, active or not."""
+        rows = (
+            self.table.search()
+            .where(f"id = '{self._escape_filter_value(memory_id)}'")
+            .limit(1)
+            .to_list()
+        )
+        return dict(rows[0]) if rows else None
 
     def _build_memory_row(
         self,
@@ -703,9 +790,10 @@ class LanceDSPyMemoryStore:
         metadata: dict[str, Any],
         merge: bool = True,
     ) -> Memory | None:
-        old = self.get_memory(memory_id=memory_id)
-        if old is None:
+        old_row = self._get_raw_memory(memory_id)
+        if old_row is None or not old_row.get("is_active", True):
             return None
+        old = self._to_memory(old_row)
         next_metadata = dict(old.metadata) if merge else {}
         next_metadata.update(metadata)
         new_row = self._build_memory_row(
@@ -718,11 +806,8 @@ class LanceDSPyMemoryStore:
             scope=old.scope,
         )
         new_row["replaces_id"] = old.id
-        self.table.add([new_row])
-        self.table.update(
-            where=f"id = '{self._escape_filter_value(old.id)}'",
-            values={"is_active": False},
-        )
+        old_row["is_active"] = False
+        self._merge_rows([new_row, old_row])
         return self._to_memory(new_row)
 
     def update_memory_scope(
@@ -732,9 +817,10 @@ class LanceDSPyMemoryStore:
         scope: ScopeLike,
         merge: bool = True,
     ) -> Memory | None:
-        old = self.get_memory(memory_id=memory_id)
-        if old is None:
+        old_row = self._get_raw_memory(memory_id)
+        if old_row is None or not old_row.get("is_active", True):
             return None
+        old = self._to_memory(old_row)
         next_scope = dict(old.scope) if merge else {}
         next_scope.update(self._scope_dict(scope))
         new_row = self._build_memory_row(
@@ -747,11 +833,8 @@ class LanceDSPyMemoryStore:
             scope=next_scope,
         )
         new_row["replaces_id"] = old.id
-        self.table.add([new_row])
-        self.table.update(
-            where=f"id = '{self._escape_filter_value(old.id)}'",
-            values={"is_active": False},
-        )
+        old_row["is_active"] = False
+        self._merge_rows([new_row, old_row])
         return self._to_memory(new_row)
 
     def create_memories(
@@ -866,8 +949,75 @@ class LanceDSPyMemoryStore:
             metadata=metadata,
             scope=scope,
         )
-        self.table.add([row])
+        self._merge_rows([row])
         return self._to_memory(row)
+
+    def _hybrid_results(
+        self,
+        *,
+        query: str,
+        filters: list[str],
+        fetch_limit: int,
+        refine_factor: int | None,
+        use_reranker: bool,
+    ) -> list[dict[str, Any]]:
+        """Vector + FTS search merged locally (RTE rejects server-side hybrid)."""
+        where = " AND ".join(filters)
+        vector_builder = cast(
+            LanceVectorQueryBuilder,
+            self.table.search(self._embed(query), vector_column_name="vector"),
+        )
+        if refine_factor is not None:
+            vector_builder = vector_builder.refine_factor(refine_factor)
+        vector_rows = [
+            dict(row)
+            for row in vector_builder.where(where).limit(fetch_limit).to_list()
+        ]
+        fts_rows = [
+            dict(row)
+            for row in self.table.search(query, query_type="fts", fts_columns="content")
+            .where(where)
+            .limit(fetch_limit)
+            .to_list()
+        ]
+
+        if use_reranker and self.reranker is not None and vector_rows and fts_rows:
+            vector_table = pa.Table.from_pylist(
+                [{**row, "_rowid": row["id"]} for row in vector_rows]
+            )
+            fts_table = pa.Table.from_pylist(
+                [{**row, "_rowid": row["id"]} for row in fts_rows]
+            )
+            ranked = self.reranker.rerank_hybrid(query, vector_table, fts_table)
+            rows = [dict(row) for row in ranked.to_pylist()]
+            for row in rows:
+                row.pop("_rowid", None)
+            return rows
+
+        return self._rrf_rows(vector_rows, fts_rows)
+
+    @staticmethod
+    def _rrf_rows(
+        vector_rows: list[dict[str, Any]],
+        fts_rows: list[dict[str, Any]],
+        k: int = 60,
+    ) -> list[dict[str, Any]]:
+        """Reciprocal-rank fusion over rows keyed by ``id``."""
+        scores: dict[str, float] = {}
+        rows: dict[str, dict[str, Any]] = {}
+        for ranked_rows in (vector_rows, fts_rows):
+            for rank, row in enumerate(ranked_rows):
+                key = str(row["id"])
+                rows.setdefault(key, row)
+                scores[key] = scores.get(key, 0.0) + 1.0 / (k + rank)
+        merged: list[dict[str, Any]] = []
+        for key in sorted(scores, key=scores.__getitem__, reverse=True):
+            row = dict(rows[key])
+            row.pop("_distance", None)
+            row.pop("_score", None)
+            row["_relevance_score"] = scores[key]
+            merged.append(row)
+        return merged
 
     @staticmethod
     def _filter_by_relevance(
@@ -922,19 +1072,15 @@ class LanceDSPyMemoryStore:
             fetch_limit *= 10
 
         if query_type == "hybrid":
-            builder = (
-                self.table.search(
-                    query_type="hybrid",
-                    vector_column_name="vector",
-                    fts_columns="content",
-                )
-                .vector(self._embed(query))
-                .text(query)
+            # LanceDB's hybrid builder requests row ids internally, which the
+            # RTE scanner rejects. Run both searches and merge locally instead.
+            results = self._hybrid_results(
+                query=query,
+                filters=filters,
+                fetch_limit=fetch_limit,
+                refine_factor=refine_factor,
+                use_reranker=use_reranker,
             )
-            if refine_factor is not None:
-                builder = builder.refine_factor(refine_factor)
-            if self.reranker is not None and use_reranker:
-                builder = builder.rerank(self.reranker, query_string=query)
         else:
             builder = cast(
                 LanceVectorQueryBuilder,
@@ -944,8 +1090,7 @@ class LanceDSPyMemoryStore:
                 builder = builder.refine_factor(refine_factor)
             if self.reranker is not None and use_reranker:
                 builder = builder.rerank(self.reranker, query_string=query)
-
-        results = builder.where(" AND ".join(filters)).limit(fetch_limit).to_list()
+            results = builder.where(" AND ".join(filters)).limit(fetch_limit).to_list()
         results = self._filter_rows_by_json_fields(
             [dict(row) for row in results],
             scope=scope,
@@ -957,10 +1102,9 @@ class LanceDSPyMemoryStore:
         return self._without_vectors(results)
 
     def update_memory(self, *, memory_id: str, content: str) -> None:
-        old = self.table.search().where(f"id = '{memory_id}'").to_list()
-        if not old:
+        old_record = self._get_raw_memory(memory_id)
+        if old_record is None:
             return
-        old_record = old[0]
         if not old_record.get("is_active", True):
             logger.warning(
                 "update_memory called on inactive record %s — skipping", memory_id
@@ -978,12 +1122,9 @@ class LanceDSPyMemoryStore:
             scope=scope,
         )
         new_row["replaces_id"] = memory_id
+        old_record["is_active"] = False
 
-        self.table.add([new_row])
-        self.table.update(
-            where=f"id = '{memory_id}'",
-            values={"is_active": False},
-        )
+        self._merge_rows([new_row, old_record])
 
     def _reconcile_one(
         self,
@@ -1398,7 +1539,10 @@ class LanceDSPyMemoryStore:
         )[0]
 
     def delete_memory(self, *, memory_id: str) -> None:
-        self.table.update(where=f"id = '{memory_id}'", values={"is_active": False})
+        row = self._get_raw_memory(memory_id)
+        if row is None:
+            return
+        self._mark_inactive([row])
 
     def delete_memories_by_search(
         self,
@@ -1442,13 +1586,8 @@ class LanceDSPyMemoryStore:
         if not results:
             return []
 
-        deleted = []
-        for row in results:
-            memory_id = str(row["id"])
-            self.table.update(where=f"id = '{memory_id}'", values={"is_active": False})
-            deleted.append(self._to_memory(dict(row)))
-
-        return deleted
+        self._mark_inactive(results)
+        return [self._to_memory(dict(row)) for row in results]
 
     def process_memories(
         self,
@@ -1518,13 +1657,10 @@ class LanceDSPyMemoryStore:
                         metadata_filter=metadata_filter,
                     )
                     if exact_results:
-                        for row in exact_results[:1]:
-                            memory_id = str(row["id"])
-                            self.table.update(
-                                where=f"id = '{memory_id}'",
-                                values={"is_active": False},
-                            )
-                            deleted.append(self._to_memory(dict(row)))
+                        self._mark_inactive(exact_results[:1])
+                        deleted.extend(
+                            self._to_memory(dict(row)) for row in exact_results[:1]
+                        )
                         continue
 
                 removed = self.delete_memories_by_search(
