@@ -24,6 +24,7 @@
     <li><a href="#about">About</a></li>
     <li><a href="#quick-start">Quick Start</a></li>
     <li><a href="#usage">Usage</a></li>
+    <li><a href="#performance">Performance</a></li>
     <li><a href="#memory-taxonomy">Memory Taxonomy</a></li>
     <li><a href="#development">Development</a></li>
     <li><a href="#contributing">Contributing</a></li>
@@ -41,6 +42,7 @@ DSPy Memory is a persistent vector memory store for DSPy-powered AI agents. It u
 - **DSPy-native extraction** — Uses `ChainOfThought` with a typed `ExtractMemory` signature to pull salient information from conversations
 - **Structured memory taxonomy** — Six memory categories (preference, semantic, episodic, procedural, summary, artifact) for fine-grained organization
 - **Persistent vector storage** — LanceDB-backed with automatic text embeddings via the DSPy `Embedder`
+- **Real-time engine** — Embedded LanceDB RTE (MemWAL) for sub-millisecond writes and immediate read-your-writes, with BTree, full-text, and IVF-PQ indexes maintained automatically
 - **Semantic search** — Query memories by user ID, session ID, conversation ID, memory type, or natural language
 - **Hybrid search** — Combine vector similarity with full-text search for better recall on keyword-heavy queries
 - **Custom scope and metadata** — Attach arbitrary ownership dimensions and structured filters to every memory
@@ -564,6 +566,36 @@ store = memory.Store(uri="./scratch", reranker=None)
 
 <p align="right">(<a href="#readme-top">back to top</a>)</p>
 
+## Performance
+
+The store enables LanceDB's embedded [real-time engine](https://docs.lancedb.com/enterprise/v1-12-0/tables/realtime-engine)
+(RTE) on every table. Writes are acknowledged by the WAL/memtable tier rather
+than waiting for a table commit, and reads see them immediately. The store
+creates and maintains three indexes:
+
+| Index | Column | Purpose |
+|---|---|---|
+| BTree | `id` | Primary-key lookups, upserts, soft deletes |
+| FTS | `content` | Keyword / hybrid search |
+| IVF-PQ | `vector` | Approximate nearest-neighbour search |
+
+**Durability.** RTE writes are non-durable by default: WAL persistence is
+batched (100 ms / 10 MB) so writes stay sub-millisecond. A crash can lose only
+that tail. The store registers an `atexit` hook that flushes pending writes on
+normal exit; call `store.flush()` before a planned shutdown or when another
+process must see them.
+
+Pass `rte_durable_write=True` to wait for WAL persistence on every write
+(~100 ms per write on macOS, a few ms on Linux). This is recorded when the
+table first enables RTE and cannot be changed afterwards.
+
+LanceDB tables created by older versions are migrated automatically: the
+legacy seed row is removed, `id` becomes non-nullable, indexes are added, and
+RTE is enabled. Embedded RTE works against local directories and object
+stores such as S3; no LanceDB Enterprise service is required.
+
+<p align="right">(<a href="#readme-top">back to top</a>)</p>
+
 ## Memory Taxonomy
 
 Every extracted memory is categorized into one of six types:
@@ -598,6 +630,7 @@ When storing directly (without extraction), the default type is `semantic`.
 | `get_memory_history` | Append-only version chain for a memory |
 | `delete_memories_by_search` | Semantic delete — find and soft-delete by query |
 | `process_memories` | Batch create/update/delete from extracted operations |
+| `flush` | Persist buffered RTE writes before shutdown (also runs at interpreter exit) |
 | `update_memory_metadata` | Patch metadata on an existing memory (merge or replace) |
 | `update_memory_scope` | Patch scope on an existing memory |
 | `session_id` / `conversation_id` | Optional scoping fields on ``create_memory``, ``create_memories``, ``search_memories``, and ``upsert_memory`` |
