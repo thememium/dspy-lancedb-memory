@@ -1,17 +1,42 @@
 # Changelog
 
-## v0.1.13 (2026-07-12)
+## v0.1.14 (2026-11-22)
 
-[Compare changes](https://github.com/thememium/dspy-lancedb-memory/compare/v0.1.12...v0.1.13)
+[Compare changes](https://github.com/thememium/dspy-lancedb-memory/compare/v0.1.13...v0.1.14)
 
-### 💅 Refactors
+### 🏡 Chore
 
-- **dspy_lancedb_memory/config.py**: annotate _signature type ([790e20a](https://github.com/thememium/dspy-lancedb-memory/commit/790e20ae5cd1208144cf7147c3790598deb7633e))
-- **test**: clean up test suite imports and formatting ([b59ba81](https://github.com/thememium/dspy-lancedb-memory/commit/b59ba81b127214f3f7844c08f8753e31a1f51869))
+- **deps**: add pytest‑xdist and bump usechange ([3abd612](https://github.com/thememium/dspy-lancedb-memory/commit/3abd612e79a73ddbbb57f2727613a6bb6a42d12f))
+- ignore .gitgepa ([87e8339](https://github.com/thememium/dspy-lancedb-memory/commit/87e833932e9d93773afdcdc882f34ceeea700e16))
 
 ### ✅ Tests
 
-- improve coverage (#7) (#7) ([92089ea](https://github.com/thememium/dspy-lancedb-memory/commit/92089eaadd5c0c3123302377c28c85abb2117fe0))
+- add case tests for memory reconciliation, reranking, and coverage ([29e84d5](https://github.com/thememium/dspy-lancedb-memory/commit/29e84d52a2fcbebeba5043c0d1c1093eb15b0fdc))
+
+### 🤖 CI
+
+- enforce 100% coverage and limit xdist workers to half the CPUs ([7647a31](https://github.com/thememium/dspy-lancedb-memory/commit/7647a31e12637761ce67b5d8f01a35a13cc23f09))
+
+### Contributors
+
+- Edward Boswell <thememium@gmail.com>
+
+## v0.1.13 (2026-11-22)
+
+[Compare changes](https://github.com/thememium/dspy-lancedb-memory/compare/v0.1.12...v0.1.13)
+
+### 🏡 Chore
+
+- **deps**: add pytest‑xdist and bump usechange ([3abd612](https://github.com/thememium/dspy-lancedb-memory/commit/3abd612e79a73ddbbb57f2727613a6bb6a42d12f))
+- ignore .gitgepa ([87e8339](https://github.com/thememium/dspy-lancedb-memory/commit/87e833932e9d93773afdcdc882f34ceeea700e16))
+
+### ✅ Tests
+
+- add case tests for memory reconciliation, reranking, and coverage ([29e84d5](https://github.com/thememium/dspy-lancedb-memory/commit/29e84d52a2fcbebeba5043c0d1c1093eb15b0fdc))
+
+### 🤖 CI
+
+- enforce 100% coverage and limit xdist workers to half the CPUs ([7647a31](https://github.com/thememium/dspy-lancedb-memory/commit/7647a31e12637761ce67b5d8f01a35a13cc23f09))
 
 ### Contributors
 
