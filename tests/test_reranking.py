@@ -393,6 +393,29 @@ class TestRerankInterface:
 
         assert "_score" in result.column_names
 
+    def test_rerank_hybrid_with_score_all(self, sample_table, sample_fts_table):
+        reranker = LiteLLMReranker(return_score="all", column="content")
+
+        with patch.object(reranker, "_merge_and_keep_scores") as mock_merge_keep:
+            with patch.object(reranker, "_rerank") as mock_rerank:
+                merged = sample_table.append_column(
+                    "_score", pa.array([0.9, 0.8, 0.7], type=pa.float32())
+                )
+                mock_merge_keep.return_value = merged
+
+                reranked = merged.append_column(
+                    "_relevance_score", pa.array([0.95, 0.85, 0.75], type=pa.float32())
+                )
+                mock_rerank.return_value = reranked
+
+                result = reranker.rerank_hybrid("query", sample_table, sample_fts_table)
+
+        # When score="all", both merge helpers keep their raw scores.
+        mock_merge_keep.assert_called_once()
+        assert "_distance" in result.column_names
+        assert "_score" in result.column_names
+        assert "_relevance_score" in result.column_names
+
     def test_rerank_hybrid_with_relevance_score(self, sample_table, sample_fts_table):
         reranker = LiteLLMReranker(return_score="relevance", column="content")
 

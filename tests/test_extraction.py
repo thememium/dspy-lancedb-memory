@@ -416,6 +416,29 @@ class TestMemoryReconciler:
         assert result.reconciled.final_content == "existing content"
         assert result.reconciled.final_type == "preference"
 
+    def test_forward_keep_without_existing_memories_falls_back_to_new_content(self):
+        reconciler = MemoryReconciler()
+
+        def mock_reconcile(**kwargs):
+            return dspy.Prediction(
+                reconciled=ReconciledMemory(
+                    action="keep",
+                    memory_id="",
+                    final_content="",
+                    final_type="",
+                )
+            )
+
+        reconciler.reconcile = mock_reconcile  # ty:ignore[invalid-assignment]
+        result = reconciler.forward(
+            new_memory_content="new memory content",
+            new_memory_type="semantic",
+            existing_memories=[],
+        )
+
+        assert result.reconciled.final_content == "new memory content"
+        assert result.reconciled.final_type == "semantic"
+
     def test_forward_without_final_type_uses_new_type_for_create(self):
         reconciler = MemoryReconciler()
 

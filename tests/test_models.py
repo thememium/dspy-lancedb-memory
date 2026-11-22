@@ -58,6 +58,10 @@ class TestMemoryTypeMissing:
         result = MemoryType._missing_("nonexistent_type")
         assert result is None
 
+    def test_memory_type_missing_maps_known_value(self):
+        """_missing_ maps a bare value string to its member (line 36)."""
+        assert MemoryType._missing_("semantic") is MemoryType.SEMANTIC
+
 
 # ---------------------------------------------------------------------------
 # memory_type_from_string()

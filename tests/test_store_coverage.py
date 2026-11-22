@@ -6,6 +6,7 @@ import json
 from types import SimpleNamespace
 
 import dspy
+import pyarrow as pa
 import pytest
 
 from dspy_lancedb_memory.models import MemoryType, ReconciledMemory, Scope
@@ -1377,7 +1378,7 @@ def test_ensure_fts_index_handles_exception(store):
 
 
 def test_ensure_fts_index_creates_index(store):
-    """Test _ensure_fts_index creates FTS index successfully."""
+    """Test _ensure_fts_index creates index successfully."""
     from unittest.mock import MagicMock
 
     # Create a mock table that succeeds on create_fts_index
@@ -1389,3 +1390,22 @@ def test_ensure_fts_index_creates_index(store):
 
     # Verify create_fts_index was called
     mock_table.create_fts_index.assert_called_once_with("content", replace=True)
+
+
+# ---------------------------------------------------------------------------
+# _get_vector_dim non-fixed-size-list schemas (lines 144-146)
+# ---------------------------------------------------------------------------
+
+
+def test_get_vector_dim_returns_none_for_variable_length_list():
+    """A variable-length list vector column has no fixed dimension."""
+    table = SimpleNamespace(
+        schema=pa.schema([pa.field("vector", pa.list_(pa.float32()))])
+    )
+    assert LanceDSPyMemoryStore._get_vector_dim(table) is None
+
+
+def test_get_vector_dim_returns_none_without_vector_column():
+    """A schema lacking a vector column has no dimension."""
+    table = SimpleNamespace(schema=pa.schema([pa.field("id", pa.string())]))
+    assert LanceDSPyMemoryStore._get_vector_dim(table) is None
